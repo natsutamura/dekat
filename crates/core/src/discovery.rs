@@ -12,7 +12,7 @@ use crate::proto::{now_ms, Announce, ANNOUNCE_INTERVAL_SECS, DISCOVERY_PORT, MUL
 use anyhow::{Context, Result};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket as StdUdpSocket},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::{net::UdpSocket, sync::mpsc};
@@ -36,7 +36,11 @@ pub fn local_ip() -> IpAddr {
 }
 
 /// Buka socket discovery dan jalankan loop announce + receive di background.
-pub fn spawn(me: Announce, seeds: Vec<SocketAddr>, tx: mpsc::Sender<Seen>) -> Result<()> {
+pub fn spawn(
+    announce: Arc<Mutex<Announce>>,
+    seeds: Vec<SocketAddr>,
+    tx: mpsc::Sender<Seen>,
+) -> Result<()> {
     use socket2::{Domain, Protocol, Socket, Type};
 
     let sock = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
@@ -65,16 +69,17 @@ pub fn spawn(me: Announce, seeds: Vec<SocketAddr>, tx: mpsc::Sender<Seen>) -> Re
     let std_sock: StdUdpSocket = sock.into();
     let sock = Arc::new(UdpSocket::from_std(std_sock)?);
 
-    let me_id = me.id.clone();
+    let me_id = announce.lock().unwrap().id.clone();
 
     // --- pengirim presence ---
     let s = sock.clone();
-    let mut me0 = me.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(ANNOUNCE_INTERVAL_SECS));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tick.tick().await;
+            // status/nama bisa berubah kapan saja; baca ulang tiap tick
+            let mut me0 = announce.lock().unwrap().clone();
             me0.ts = now_ms();
             let bytes = match serde_json::to_vec(&me0) {
                 Ok(b) => b,

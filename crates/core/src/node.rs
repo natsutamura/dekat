@@ -1,6 +1,6 @@
 //! Node: gabungan discovery + transport + peer table + event stream.
 //!
-//! Aturan koneksi M0: untuk tiap pasangan node, hanya node dengan `id`
+//! Aturan koneksi: untuk tiap pasangan node, hanya node dengan `id`
 //! lebih kecil (lexicographic) yang melakukan dial. Hasilnya tepat satu
 //! koneksi TCP bidirectional per pasangan — tidak ada pesan dobel.
 
@@ -30,6 +30,8 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// alamat `ip:port` yang di-announce secara unicast (fallback)
     pub seeds: Vec<SocketAddr>,
+    /// matikan presence multicast (dipakai test supaya tidak saling ganggu)
+    pub discovery: bool,
 }
 
 impl Config {
@@ -39,6 +41,7 @@ impl Config {
             port: DEFAULT_APP_PORT,
             data_dir: data_dir.into(),
             seeds: Vec::new(),
+            discovery: true,
         }
     }
 }
@@ -51,6 +54,8 @@ pub struct Peer {
     pub os: String,
     pub addr: SocketAddr,
     pub last_seen: u64,
+    pub status: Status,
+    pub online: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -58,16 +63,32 @@ pub enum Event {
     PeerUp(Peer),
     PeerDown(String),
     Text {
+        id: String,
         from: String,
         from_name: String,
         to: String,
         body: String,
         ts: u64,
         mine: bool,
+        members: Option<Vec<String>>,
     },
     Ack {
         id: String,
         ts: u64,
+    },
+    Typing {
+        from: String,
+        to: String,
+        on: bool,
+    },
+    Read {
+        from: String,
+        to: String,
+        up_to_ts: u64,
+    },
+    PeerStatus {
+        id: String,
+        status: Status,
     },
     Warn(String),
 }
@@ -77,6 +98,7 @@ struct Inner {
     name: String,
     fp: String,
     port: u16,
+    announce: Arc<Mutex<Announce>>,
     peers: Mutex<HashMap<String, Peer>>,
     conns: Mutex<HashMap<String, mpsc::Sender<Frame>>>,
     connecting: Mutex<HashSet<String>>,
@@ -94,12 +116,24 @@ impl Node {
             .with_context(|| format!("bind TCP port {}", cfg.port))?;
         let port = listener.local_addr()?.port();
 
+        let announce = Arc::new(Mutex::new(Announce {
+            v: PROTO_VERSION,
+            id: identity.id(),
+            name: identity.name.clone(),
+            fp: identity.fp(),
+            os: std::env::consts::OS.to_string(),
+            port,
+            status: Status::Online,
+            ts: now_ms(),
+        }));
+
         let (events, _) = broadcast::channel(512);
         let node = Node(Arc::new(Inner {
             id: identity.id(),
             name: identity.name.clone(),
             fp: identity.fp(),
             port,
+            announce: announce.clone(),
             peers: Mutex::new(HashMap::new()),
             conns: Mutex::new(HashMap::new()),
             connecting: Mutex::new(HashSet::new()),
@@ -108,7 +142,9 @@ impl Node {
 
         node.clone().spawn_acceptor(listener);
         node.clone().spawn_sweeper();
-        node.clone().spawn_discovery(cfg.seeds)?;
+        if cfg.discovery {
+            node.clone().spawn_discovery(announce, cfg.seeds)?;
+        }
 
         Ok(node)
     }
@@ -129,6 +165,10 @@ impl Node {
         self.0.port
     }
 
+    pub fn status(&self) -> Status {
+        self.0.announce.lock().unwrap().status
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.0.events.subscribe()
     }
@@ -137,6 +177,10 @@ impl Node {
         let mut v: Vec<Peer> = self.0.peers.lock().unwrap().values().cloned().collect();
         v.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         v
+    }
+
+    pub fn peer(&self, id: &str) -> Option<Peer> {
+        self.0.peers.lock().unwrap().get(id).cloned()
     }
 
     pub fn is_connected(&self, peer_id: &str) -> bool {
@@ -158,41 +202,132 @@ impl Node {
             .cloned()
     }
 
-    /// Kirim teks. `to` = id peer, atau [`BROADCAST`] untuk semua koneksi.
-    pub fn send_text(&self, to: &str, body: &str) -> Result<String> {
-        let msg_id = new_msg_id();
-        let ts = now_ms();
-        let frame = Frame::Text {
-            id: msg_id.clone(),
-            from: self.0.id.clone(),
-            from_name: self.0.name.clone(),
-            to: to.to_string(),
-            ts,
-            body: body.to_string(),
+    /// Ubah status presence sendiri dan sebarkan langsung ke peer yang terhubung.
+    pub fn set_status(&self, status: Status) {
+        self.0.announce.lock().unwrap().status = status;
+        let frame = Frame::Presence {
+            id: self.0.id.clone(),
+            status,
         };
-        let targets: Vec<mpsc::Sender<Frame>> = {
-            let conns = self.0.conns.lock().unwrap();
-            if to == BROADCAST {
-                conns.values().cloned().collect()
-            } else {
-                conns.get(to).cloned().into_iter().collect()
-            }
-        };
-        if targets.is_empty() {
-            bail!("tidak ada koneksi ke '{to}' — peer belum ketemu atau belum connect");
-        }
-        for tx in targets {
+        for tx in self.0.conns.lock().unwrap().values() {
             let _ = tx.try_send(frame.clone());
         }
+    }
+
+    /// Kirim teks ke satu peer, atau [`BROADCAST`].
+    pub fn send_text(&self, to: &str, body: &str) -> Result<String> {
+        let (msg_id, ts) = self.dispatch(vec![to.to_string()], to.to_string(), body, None)?;
         self.emit(Event::Text {
+            id: msg_id.clone(),
             from: self.0.id.clone(),
             from_name: self.0.name.clone(),
             to: to.to_string(),
             body: body.to_string(),
             ts,
             mine: true,
+            members: None,
         });
         Ok(msg_id)
+    }
+
+    /// Kirim pesan ke grup. `members` harus memuat id diri sendiri.
+    /// Mengembalikan `(room_id, msg_id)`.
+    pub fn send_group(&self, members: &[String], body: &str) -> Result<(String, String)> {
+        let room = room_id(members);
+        let (msg_id, ts) = self.dispatch(members.to_vec(), room.clone(), body, Some(members.to_vec()))?;
+        self.emit(Event::Text {
+            id: msg_id.clone(),
+            from: self.0.id.clone(),
+            from_name: self.0.name.clone(),
+            to: room.clone(),
+            body: body.to_string(),
+            ts,
+            mine: true,
+            members: Some(members.to_vec()),
+        });
+        let _ = ts;
+        Ok((room, msg_id))
+    }
+
+    pub fn send_typing(&self, to: &str, on: bool) -> Result<()> {
+        let frame = Frame::Typing {
+            from: self.0.id.clone(),
+            to: to.to_string(),
+            on,
+        };
+        let conns = self.0.conns.lock().unwrap();
+        let tx = conns
+            .get(to)
+            .cloned()
+            .with_context(|| format!("tidak ada koneksi ke {to}"))?;
+        drop(conns);
+        let _ = tx.try_send(frame);
+        Ok(())
+    }
+
+    /// Read receipt: "semua pesanmu sampai ts ini sudah kubaca".
+    pub fn send_read(&self, to: &str, up_to_ts: u64) -> Result<()> {
+        let frame = Frame::Read {
+            from: self.0.id.clone(),
+            to: to.to_string(),
+            up_to_ts,
+        };
+        let conns = self.0.conns.lock().unwrap();
+        let tx = conns
+            .get(to)
+            .cloned()
+            .with_context(|| format!("tidak ada koneksi ke {to}"))?;
+        drop(conns);
+        let _ = tx.try_send(frame);
+        Ok(())
+    }
+
+    /// Kirim frame teks ke daftar target (peer id atau `*`).
+    fn dispatch(
+        &self,
+        targets: Vec<String>,
+        to_field: String,
+        body: &str,
+        members: Option<Vec<String>>,
+    ) -> Result<(String, u64)> {
+        let msg_id = new_msg_id();
+        let ts = now_ms();
+        let frame = Frame::Text {
+            id: msg_id.clone(),
+            from: self.0.id.clone(),
+            from_name: self.0.name.clone(),
+            to: to_field,
+            ts,
+            body: body.to_string(),
+            members,
+        };
+        let senders: Vec<mpsc::Sender<Frame>> = {
+            let conns = self.0.conns.lock().unwrap();
+            if targets.len() == 1 && targets[0] == BROADCAST {
+                conns.values().cloned().collect()
+            } else {
+                targets
+                    .iter()
+                    .filter(|t| *t != &self.0.id)
+                    .filter_map(|t| conns.get(t).cloned())
+                    .collect()
+            }
+        };
+        if senders.is_empty() {
+            bail!("belum ada koneksi ke tujuan — peer belum ketemu atau belum connect");
+        }
+        for tx in senders {
+            let _ = tx.try_send(frame.clone());
+        }
+        Ok((msg_id, ts))
+    }
+
+    /// Dial peer secara manual (fallback kalau discovery diblok jaringan, dan buat test).
+    pub async fn connect_peer(&self, addr: SocketAddr) -> Result<()> {
+        let stream = TcpStream::connect(addr)
+            .await
+            .with_context(|| format!("dial {addr}"))?;
+        self.handle_conn(stream, addr, true).await
     }
 
     fn emit(&self, e: Event) {
@@ -232,12 +367,20 @@ impl Node {
                     let peers = self.0.peers.lock().unwrap();
                     peers
                         .values()
-                        .filter(|p| now.saturating_sub(p.last_seen) > PEER_TTL_SECS * 1000)
+                        .filter(|p| {
+                            p.online && now.saturating_sub(p.last_seen) > PEER_TTL_SECS as u64 * 1000
+                        })
                         .map(|p| p.id.clone())
                         .collect()
                 };
                 for id in dead {
-                    self.0.peers.lock().unwrap().remove(&id);
+                    {
+                        let mut peers = self.0.peers.lock().unwrap();
+                        if let Some(p) = peers.get_mut(&id) {
+                            p.online = false;
+                            p.status = Status::Online;
+                        }
+                    }
                     self.0.conns.lock().unwrap().remove(&id);
                     self.emit(Event::PeerDown(id));
                 }
@@ -245,18 +388,9 @@ impl Node {
         });
     }
 
-    fn spawn_discovery(self, seeds: Vec<SocketAddr>) -> Result<()> {
-        let me = Announce {
-            v: PROTO_VERSION,
-            id: self.0.id.clone(),
-            name: self.0.name.clone(),
-            fp: self.0.fp.clone(),
-            os: std::env::consts::OS.to_string(),
-            port: self.0.port,
-            ts: now_ms(),
-        };
+    fn spawn_discovery(self, announce: Arc<Mutex<Announce>>, seeds: Vec<SocketAddr>) -> Result<()> {
         let (tx, mut rx) = mpsc::channel::<Seen>(64);
-        discovery::spawn(me, seeds, tx)?;
+        discovery::spawn(announce, seeds, tx)?;
 
         tokio::spawn(async move {
             while let Some(seen) = rx.recv().await {
@@ -279,20 +413,31 @@ impl Node {
             os: a.os.clone(),
             addr,
             last_seen: now_ms(),
+            status: a.status,
+            online: true,
         };
-        let is_new = self.upsert_peer(peer.clone());
+        let (is_new, status_changed) = self.upsert_peer(peer.clone());
         if is_new {
             self.emit(Event::PeerUp(peer.clone()));
+        } else if status_changed {
+            self.emit(Event::PeerStatus {
+                id: peer.id.clone(),
+                status: peer.status,
+            });
         }
         self.maybe_connect(&peer);
     }
 
-    /// Insert/refresh peer. `true` kalau peer baru.
-    fn upsert_peer(&self, p: Peer) -> bool {
+    /// Insert/refresh peer. `(baru, status berubah)`.
+    fn upsert_peer(&self, p: Peer) -> (bool, bool) {
         let mut peers = self.0.peers.lock().unwrap();
         match peers.get_mut(&p.id) {
             Some(old) => {
+                let was_online = old.online;
+                let status_changed = old.status != p.status || !was_online;
                 old.last_seen = p.last_seen;
+                old.online = true;
+                old.status = p.status;
                 if !p.name.is_empty() {
                     old.name = p.name;
                     old.fp = p.fp;
@@ -301,11 +446,11 @@ impl Node {
                     old.os = p.os;
                 }
                 old.addr = SocketAddr::new(p.addr.ip(), p.addr.port());
-                false
+                (false, status_changed)
             }
             None => {
                 peers.insert(p.id.clone(), p);
-                true
+                (true, false)
             }
         }
     }
@@ -353,16 +498,25 @@ impl Node {
             name: self.0.name.clone(),
             fp: self.0.fp.clone(),
             port: self.0.port,
+            os: std::env::consts::OS.to_string(),
+            status: self.status(),
         };
         write_frame(&mut wr, &hello).await.context("kirim hello")?;
 
-        let (pid, pname, pfp, pport) = match read_frame(&mut rd).await.context("baca hello")? {
-            Some(Frame::Hello {
-                id, name, fp, port, ..
-            }) => (id, name, fp, port),
-            Some(f) => bail!("frame pertama bukan hello: {f:?}"),
-            None => return Ok(()),
-        };
+        let (pid, pname, pfp, pport, pos, pstatus) =
+            match read_frame(&mut rd).await.context("baca hello")? {
+                Some(Frame::Hello {
+                    id,
+                    name,
+                    fp,
+                    port,
+                    os,
+                    status,
+                    ..
+                }) => (id, name, fp, port, os, status),
+                Some(f) => bail!("frame pertama bukan hello: {f:?}"),
+                None => return Ok(()),
+            };
         if pid == self.0.id {
             bail!("menerima koneksi dari diri sendiri");
         }
@@ -386,12 +540,20 @@ impl Node {
             id: pid.clone(),
             name: pname,
             fp: pfp,
-            os: "?".to_string(),
+            os: if pos.is_empty() { "?".to_string() } else { pos },
             addr: SocketAddr::new(addr.ip(), pport),
             last_seen: now_ms(),
+            status: pstatus,
+            online: true,
         };
-        if self.upsert_peer(peer.clone()) {
-            self.emit(Event::PeerUp(peer));
+        let (is_new, status_changed) = self.upsert_peer(peer.clone());
+        if is_new {
+            self.emit(Event::PeerUp(peer.clone()));
+        } else if status_changed {
+            self.emit(Event::PeerStatus {
+                id: peer.id.clone(),
+                status: peer.status,
+            });
         }
 
         let res = loop {
@@ -421,29 +583,58 @@ impl Node {
                 to,
                 ts,
                 body,
+                members,
             } => {
-                if to == BROADCAST || to == self.0.id {
-                    if from != self.0.id {
-                        // refresh presence: peer ini jelas hidup
-                        if let Some(p) = self.0.peers.lock().unwrap().get_mut(&from) {
-                            p.last_seen = now_ms();
-                        }
+                let for_me = to == BROADCAST
+                    || to == self.0.id
+                    || (is_room(&to)
+                        && members
+                            .as_ref()
+                            .map(|m| m.iter().any(|x| x == &self.0.id))
+                            .unwrap_or(false));
+                if !for_me {
+                    let _ = (id, from, from_name, ts, body, members);
+                    return Ok(());
+                }
+                if from != self.0.id {
+                    if let Some(p) = self.0.peers.lock().unwrap().get_mut(&from) {
+                        p.last_seen = now_ms();
+                        p.online = true;
                     }
-                    self.emit(Event::Text {
-                        from: from.clone(),
-                        from_name,
-                        to,
-                        body,
-                        ts,
-                        mine: false,
-                    });
-                    let ack = Frame::Ack { id, ts: now_ms() };
-                    if let Some(tx) = self.0.conns.lock().unwrap().get(&from).cloned() {
-                        let _ = tx.try_send(ack);
-                    }
+                }
+                self.emit(Event::Text {
+                    id: id.clone(),
+                    from: from.clone(),
+                    from_name,
+                    to,
+                    body,
+                    ts,
+                    mine: false,
+                    members,
+                });
+                let ack = Frame::Ack { id, ts: now_ms() };
+                if let Some(tx) = self.0.conns.lock().unwrap().get(&from).cloned() {
+                    let _ = tx.try_send(ack);
                 }
             }
             Frame::Ack { id, ts } => self.emit(Event::Ack { id, ts }),
+            Frame::Typing { from, to, on } => self.emit(Event::Typing { from, to, on }),
+            Frame::Read {
+                from,
+                to,
+                up_to_ts,
+            } => self.emit(Event::Read {
+                from,
+                to,
+                up_to_ts,
+            }),
+            Frame::Presence { id, status } => {
+                if let Some(p) = self.0.peers.lock().unwrap().get_mut(&id) {
+                    p.status = status;
+                    p.last_seen = now_ms();
+                }
+                self.emit(Event::PeerStatus { id, status });
+            }
         }
         Ok(())
     }

@@ -50,6 +50,7 @@ fn parse_args() -> Result<Config> {
         port,
         data_dir,
         seeds,
+        discovery: true,
     })
 }
 
@@ -85,6 +86,7 @@ fn print_event(e: Event) {
             body,
             ts,
             mine,
+            ..
         } => {
             if mine {
                 let dest = if to == BROADCAST {
@@ -99,6 +101,22 @@ fn print_event(e: Event) {
             }
         }
         Event::Ack { id, ts } => println!("[{}] ✓ terkirim ({})", fmt_hms(ts), &id[..8]),
+        Event::Typing { from, to, on } => {
+            if on {
+                println!("  … {} sedang mengetik ({})", &from[..6.min(from.len())], to)
+            }
+        }
+        Event::Read { from, up_to_ts, .. } => println!(
+            "[{}] {} membaca pesanmu (sampai ts {})",
+            fmt_hms(up_to_ts),
+            &from[..6.min(from.len())],
+            up_to_ts
+        ),
+        Event::PeerStatus { id, status } => println!(
+            "  ~ {} sekarang {}",
+            &id[..6.min(id.len())],
+            status.as_str()
+        ),
         Event::Warn(w) => println!("! {w}"),
     }
 }

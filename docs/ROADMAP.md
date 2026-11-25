@@ -22,8 +22,8 @@ keduanya cuma konsumen event.
 | # | isi | output yang bisa dilihat |
 |---|---|---|
 | **M0** ✅ | proto, identity, discovery multicast+fallback, TCP transport, chat teks broadcast & DM, ack | CLI dua mesin saling chat (sudah diuji) |
-| **M1** | keamanan & ketahanan: TLS self-signed + TOFU pinning, signature pesan, SQLite riwayat, reconnect backoff, presence online/idle/dnd, typing, read receipt, unread count, model room/group | core stabil, belum ada UI |
-| **M2** | UI desktop (Tauri v2): sidebar + thread, bubble, dark/light, chat bar (attach/emoji/send), avatar & group picture, clear chat, mark read/unread, notifikasi native | app desktop bisa dipakai harian |
+| **M1** 🟡 | **selesai**: SQLite riwayat, presence online/idle/dnd, typing, read receipt, unread count, model room/group. **belum**: TLS self-signed + TOFU pinning, signature pesan, reconnect backoff | core stabil |
+| **M2** 🟡 | **selesai**: sidebar + thread, bubble, dark/light, chat bar (emoji/send), avatar inisial + status dot, clear chat, mark read/unread, toast notifikasi, zoom (Ctrl +/-/0/scroll), window resize, custom bubble. **belum**: foto profil/grup (upload gambar), notifikasi OS native | app desktop bisa dipakai harian |
 | **M3** | file & emoji: kirim file chunked + progress + resume, drag & drop, paste gambar, emoji picker, preview gambar | kirim file antar OS |
 | **M4** | Android: build Tauri mobile, `MulticastLock`, izin `NEARBY_WIFI_DEVICES` (API 33+), notifikasi lokal, foreground service | HP Android chat di LAN yang sama |
 | **M5** | voice call: WebRTC audio 1:1, lalu group call (mesh ≤6 orang; SFU kecil kalau lebih), indikator mute/speaking | call antar platform |

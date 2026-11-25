@@ -78,3 +78,10 @@ Tipografi: `-apple-system, "Segoe UI Variable", "Segoe UI", Roboto, "Noto Sans",
 - Status tidak hanya warna: ada label teks di header.
 - Semua aksi punya keyboard path; target sentuh Android ≥ 44px.
 - `prefers-reduced-motion` → matikan animasi slide.
+
+## Zoom & ukuran window (implementasi M2)
+
+- Window resizable, min 720×480, default 1080×680; sidebar 300px (250px di bawah 820px).
+- Zoom hanya men-scale **teks & bubble chat**, bukan seluruh UI: `--scale` (0.8–1.6) di `:root`.
+- Shortcut: `Ctrl + +`, `Ctrl + -`, `Ctrl + 0` (reset), `Ctrl + scroll` (di mana saja).
+- Nilai zoom disimpan di tabel `settings` (key `scale`) sehingga bertahan antar restart.

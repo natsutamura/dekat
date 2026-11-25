@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LAN Chat</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app" id="app" data-theme="light">
+
+  <aside class="sidebar">
+    <div class="me-card">
+      <div class="avatar me" id="me-avatar">R<span class="dot online" id="me-dot"></span></div>
+      <div class="me-meta">
+        <div class="me-name" id="me-name">…</div>
+        <button class="status-btn" id="status-btn" title="Ubah status">
+          <span class="sq" id="me-status-dot"></span><span id="me-status-text">Online</span>
+        </button>
+      </div>
+      <button class="icon-btn" id="btn-settings" title="Pengaturan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1A1.7 1.7 0 008 19.4a1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H2a2 2 0 110-4h.1A1.7 1.7 0 004.6 8a1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V2a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1H22a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>
+      </button>
+    </div>
+
+    <div class="search-row">
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="search" placeholder="Cari" autocomplete="off">
+      </div>
+      <button class="icon-btn" id="btn-new" title="Chat / grup baru">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+
+    <div class="list-scroll">
+      <div class="section-label">Percakapan</div>
+      <ul id="threads" class="threads"></ul>
+      <div class="section-label">Di jaringan ini</div>
+      <ul id="peer-list" class="threads peers"></ul>
+    </div>
+  </aside>
+
+  <section class="panel">
+    <header class="panel-head" id="panel-head">
+      <div class="avatar sm" id="head-avatar">?</div>
+      <div class="head-meta">
+        <div class="head-name" id="head-name">Pilih percakapan</div>
+        <div class="head-status" id="head-status">—</div>
+      </div>
+      <button class="icon-btn" id="btn-call" title="Voice call (M5)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M15 10l4.5-2.6v9.2L15 14z"/><rect x="3" y="6" width="12" height="12" rx="2.4"/></svg>
+      </button>
+      <button class="icon-btn" id="btn-info" title="Info thread">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="1" fill="currentColor" stroke="none"/></svg>
+      </button>
+    </header>
+
+    <div class="messages" id="messages">
+      <div class="empty" id="empty">
+        <div class="empty-icon">💬</div>
+        <div>Pilih percakapan di kiri</div>
+        <div class="empty-sub">Semua jalan di jaringan lokal, tanpa internet</div>
+      </div>
+    </div>
+
+    <footer class="chatbar" id="chatbar">
+      <button class="circle" id="btn-attach" title="Lampirkan file (M3)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <div class="inputwrap">
+        <textarea id="input" rows="1" placeholder="Pesan ke…" maxlength="4000"></textarea>
+        <button class="circle ghost" id="btn-emoji" title="Emoji">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c.9 1.2 2.1 1.8 3.5 1.8s2.6-.6 3.5-1.8"/><circle cx="9" cy="9.5" r=".9" fill="currentColor" stroke="none"/><circle cx="15" cy="9.5" r=".9" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
+      <button class="send" id="btn-send" title="Kirim (Enter)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M12 19V6M6 12l6-6 6 6"/></svg>
+      </button>
+    </footer>
+  </section>
+</div>
+
+<div class="emoji-pop" id="emoji-pop" hidden></div>
+<div class="menu" id="ctx-menu" hidden></div>
+<div class="toasts" id="toasts"></div>
+
+<div class="modal-backdrop" id="modal" hidden>
+  <div class="modal" id="modal-box"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -14,3 +14,4 @@ rand = { workspace = true }
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
 tracing = { workspace = true }
+rusqlite = { version = "0.43.0", features = ["bundled"] }

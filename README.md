@@ -3,18 +3,27 @@
 Chat P2P di jaringan lokal (tanpa server, tanpa internet) untuk **Windows, Linux, Android**.
 Tampilan mengikuti iMessage: bubble chat, tema dark/light, status online/idle/DND.
 
-Status sekarang: **M0 selesai & teruji** — discovery, transport, chat teks (broadcast + DM),
-ack delivery, identitas stabil. UI belum ada (M2).
+Status: **M0 + M1 selesai & teruji**, **M2 (UI desktop) jalan** — app Tauri v2 sudah dibuat,
+chat dua arah antar dua window asli terbukti bekerja (lihat `docs/M1-M2-RESULT.md`).
 
-## Jalanin (M0, CLI)
+## Jalanin app desktop
 
 ```bash
-cargo build
-./target/debug/lanchat --name ray --port 42001 --dir ~/.lanchat
+# butuh dependency Tauri (Debian/Ubuntu):
+#   libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev build-essential
+cargo build -p lanchat-desktop
+LANCHAT_NAME=ray LANCHAT_PORT=42101 LANCHAT_DIR=~/.lanchat-ray \
+  ./target/debug/lanchat-desktop
 ```
 
-Di mesin lain (satu network): `--name iphone --port 42002`.
-Keduanya otomatis saling menemukan via multicast. Di dalam sesi:
+Dua instance di satu mesin cukup beda `LANCHAT_PORT` + `LANCHAT_DIR`.
+Di mesin lain (satu network) pakai port default saja — keduanya otomatis saling menemukan.
+
+## Jalanin CLI (buat debugging core)
+
+```bash
+./target/debug/lanchat --name ray --port 42001 --dir ~/.lanchat
+```
 
 ```
 <teks>              broadcast ke semua peer
@@ -23,31 +32,71 @@ Keduanya otomatis saling menemukan via multicast. Di dalam sesi:
 /ping               info node sendiri
 ```
 
-Kalau jaringan memblok multicast, tambahkan seed manual: `--seed 10.10.1.28:41234` (UDP discovery port).
+Kalau jaringan memblok multicast, tambahkan seed manual: `--seed 10.10.1.28:41234`.
 
-Test E2E dua instance di satu host: `bash scripts/e2e-m0.sh`.
+## Fitur yang sudah jalan
+
+| fitur | status |
+|---|---|
+| Chat 1:1 (DM) | ✅ dua arah, terbukti di app nyata |
+| Group chat | ✅ room deterministik dari daftar anggota |
+| Broadcast ke semua peer | ✅ |
+| Riwayat lokal | ✅ SQLite, persisten antar restart |
+| Clear chat | ✅ klik kanan thread → hapus semua pesan |
+| Mark read / unread | ✅ badge unread + tanda manual |
+| Typing indicator | ✅ (DM) |
+| Read receipt (✓✓) | ✅ |
+| Status online / idle / DND | ✅ + tersebar real-time ke peer |
+| Tema dark / light | ✅ |
+| Custom bubble (warna, radius) | ✅ di Pengaturan |
+| Zoom teks chat | ✅ `Ctrl + +`, `Ctrl + -`, `Ctrl + 0`, `Ctrl + scroll` |
+| Window resize | ✅ bebas (min 720×480) |
+| Avatar inisial + status dot | ✅ |
+| Emoji picker | ✅ |
+| Notifikasi in-app (toast) | ✅ |
+| Kirim file | ⬜ M3 |
+| Voice / video call | ⬜ M5 |
+| Android | ⬜ M4 |
 
 ## Struktur
 
 ```
-crates/core/     lib: proto, identity, discovery, node   (dipakai UI apa pun)
-crates/cli/      harness CLI buat nguji core
-apps/            UI desktop+mobile (M2, rencana: Tauri v2)
-docs/            PROTOCOL.md, ROADMAP.md, UI-SPEC.md
+crates/core/       lib: proto, identity, discovery, node, store (SQLite)
+crates/cli/        harness CLI buat nguji core
+apps/desktop/      app Tauri v2 (Rust) + ui/ (HTML/CSS/JS, tanpa framework)
+apps/mockup/       mockup statis HTML (arsip, sudah digantikan app nyata)
+docs/              PROTOCOL.md, ROADMAP.md, UI-SPEC.md, M0-RESULT.md, M1-M2-RESULT.md
 ```
 
-## Kenapa Rust di core
+UI tidak pakai bundler/framework: `apps/desktop/ui/` berisi 3 file (html/css/js) yang
+di-embed ke binary. `preview.html` + `mock-tauri.js` dipakai buat buka UI yang sama di
+browser tanpa Tauri (data contoh).
 
-Network loop, peer table, dan enkripsi jalan di satu proses Rust; UI cuma konsumen event.
-Binary kecil (LTO + strip), RAM rendah, dan bisa dipakai ulang apa pun framework UI-nya.
+## Test
+
+```bash
+cargo test          # 12 test: 8 unit (proto/identity/store) + 4 integrasi dua node nyata
+bash scripts/e2e-m0.sh          # dua instance CLI chat-chatan
+bash scripts/run-desktop-e2e.sh # dua window app desktop di X display
+```
 
 ## Keamanan (status jujur)
 
-M0 masih plaintext: id node berasal dari public key Ed25519, tapi frame belum ditandatangani
-dan TLS belum aktif. Jangan dipakai di jaringan yang tidak dipercaya sampai M1 selesai
-(TLS + pinning TOFU + signature per pesan).
+Masih plaintext: id node berasal dari public key Ed25519, tapi frame belum ditandatangani
+dan TLS belum aktif. **Jangan dipakai di jaringan yang tidak dipercaya** sampai TLS +
+pinning TOFU + signature per pesan selesai. Ini pekerjaan M1-lanjut yang belum dikerjakan.
 
-## Mockup UI
+## Catatan platform
 
-`apps/mockup/index.html` — mockup statis (buka di browser, `?theme=dark` untuk tema gelap).
-Screenshot: `apps/mockup/mockup-light.png` dan `mockup-dark.png`.
+- **Windows**: butuh WebView2 runtime (Windows 11 sudah ada). Firewall akan minta izin saat
+  pertama listen — wajib diizinkan, kalau tidak peer tidak bisa connect.
+- **Linux**: butuh `libwebkit2gtk-4.1`. Di X11 tanpa compositor, window bisa tampak abu-abu
+  saat tidak fokus (xfwm4 `inactive_opacity`), bukan bug app.
+- **Android**: belum dibangun; wajib `MulticastLock` + izin `NEARBY_WIFI_DEVICES` untuk discovery.
+- **WiFi kampus/kantor**: AP/client isolation memblok P2P sepenuhnya — tidak bisa diakali dari app.
+
+## Screenshot (dari app nyata, bukan mockup)
+
+![Discovery](docs/screens/app-01-discovery.png)
+![Chat](docs/screens/app-03-chat.png)
+![Dark](docs/screens/app-06-dark.png)
