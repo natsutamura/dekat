@@ -8,11 +8,17 @@
 //!    tidak tersendat
 //! 5. tunggu [`Frame::FileDone`] dari penerima
 //!
-//! Sisi penerima menulis ke `<data_dir>/files/<msg_id>-<nama-aman>` lalu memverifikasi
-//! sha256; kalau tidak cocok, file dihapus dan transfer dinyatakan gagal.
+//! Sisi penerima menulis ke `<data_dir>/files/partial/<sha256>.part` sambil
+//! memverifikasi sha256 di akhir; kalau cocok, file dipindah ke
+//! `<data_dir>/files/<msg_id>-<nama-aman>`.
 //!
-//! Batasan disengaja untuk M3: satu file per pesan, penerima harus online, tidak ada
-//! resume kalau koneksi putus. Semua itu masuk M3-lanjut/M4.
+//! **Resume**: partial diberi nama menurut sha256 isi file, bukan menurut msg_id.
+//! Kalau koneksi putus di tengah, pengiriman ulang file yang sama akan menemukan
+//! partial itu dan melanjutkan dari byte terakhir — tidak mulai dari nol. Penerima
+//! melaporkan posisinya lewat `FileAccept.have`, jadi pengirim yang menentukan
+//! mulai dari potongan mana.
+//!
+//! Batasan M3: satu file per pesan, penerima harus online.
 
 use crate::proto::{
     now_ms, safe_filename, Frame, FILE_CHUNK_BYTES, MAX_FILE_BYTES, MAX_FRAME,
@@ -60,7 +66,10 @@ pub struct FileContext {
 
 /// Transfer masuk yang sedang menunggu potongan.
 struct Inbound {
+    /// File tujuan akhir (belum ada sampai transfer selesai).
     path: PathBuf,
+    /// File setengah jadi yang dipakai untuk resume.
+    partial: PathBuf,
     file: File,
     digest: Sha256,
     expected_sha: String,
@@ -132,6 +141,24 @@ impl FileTransfer {
     where
         F: FnMut(Frame) -> bool,
     {
+        self.stream_file_from(msg_id, path, meta, 0, send)
+    }
+
+    /// Sama seperti [`Self::stream_file`], tapi mulai dari byte ke-`start_offset`.
+    ///
+    /// Dipakai untuk resume: penerima melaporkan `have`, pengirim langsung
+    /// melompat ke potongan itu, jadi byte yang sudah terkirim tidak diulang.
+    pub fn stream_file_from<F>(
+        &self,
+        msg_id: &str,
+        path: &Path,
+        meta: &FileMeta,
+        start_offset: u64,
+        mut send: F,
+    ) -> Result<()>
+    where
+        F: FnMut(Frame) -> bool,
+    {
         {
             let mut out = self.outgoing.lock().unwrap();
             out.insert(
@@ -146,9 +173,19 @@ impl FileTransfer {
             );
         }
         let result = (|| -> Result<()> {
+            // Offset harus kelipatan potongan; kalau tidak, mulai dari awal saja
+            // (lebih baik kirim ulang daripada menghasilkan file rusak).
+            let mut start = start_offset;
+            if start % FILE_CHUNK_BYTES as u64 != 0 || start >= meta.size {
+                start = 0;
+            }
             let mut f = File::open(path)?;
+            if start > 0 {
+                use std::io::Seek;
+                f.seek(std::io::SeekFrom::Start(start))?;
+            }
             let mut buf = vec![0u8; FILE_CHUNK_BYTES];
-            let mut idx = 0u32;
+            let mut idx = (start / FILE_CHUNK_BYTES as u64) as u32;
             loop {
                 let n = f.read(&mut buf)?;
                 if n == 0 {
@@ -170,6 +207,7 @@ impl FileTransfer {
                 idx += 1;
                 if let Some(t) = self.outgoing.lock().unwrap().get_mut(msg_id) {
                     t.sent_chunks = idx;
+                    t.received_bytes = idx as u64 * FILE_CHUNK_BYTES as u64;
                 }
             }
             if idx != meta.chunks {
@@ -184,7 +222,7 @@ impl FileTransfer {
     }
 
     /// Mulai menerima file. Dipanggil saat `FileOffer` datang dan diterima.
-    pub fn begin_inbound(&self, dir: &Path, msg_id: &str, name: &str, size: u64, sha256: &str, total_chunks: u32) -> Result<PathBuf> {
+    pub fn begin_inbound(&self, dir: &Path, msg_id: &str, name: &str, size: u64, sha256: &str, total_chunks: u32) -> Result<(PathBuf, u64)> {
         self.begin_inbound_ctx(dir, msg_id, name, size, sha256, total_chunks, FileContext::default())
     }
 
@@ -199,7 +237,7 @@ impl FileTransfer {
         sha256: &str,
         total_chunks: u32,
         ctx: FileContext,
-    ) -> Result<PathBuf> {
+    ) -> Result<(PathBuf, u64)> {
         if size > MAX_FILE_BYTES {
             bail!("file ditolak: {} byte melebihi batas", size);
         }
@@ -207,15 +245,52 @@ impl FileTransfer {
         let safe = safe_filename(name);
         // nama file unik per pesan, jadi pengiriman ulang tidak menimpa file lain
         let path = dir.join(format!("{msg_id}-{safe}"));
-        let file = File::create(&path).with_context(|| format!("buat {}", path.display()))?;
+
+        // Partial dinamai menurut sha256 isi file: pengiriman ulang file yang sama
+        // (walau msg_id baru) tetap menemukan sisa transfer sebelumnya.
+        let partial_dir = dir.join("partial");
+        std::fs::create_dir_all(&partial_dir)?;
+        let partial = partial_dir.join(format!("{}.part", sha256));
+
+        // Lanjutkan hanya kalau sisa partial masih valid: ukurannya kelipatan
+        // potongan dan tidak melebihi ukuran file.
+        let mut received = 0u64;
+        if let Ok(m) = std::fs::metadata(&partial) {
+            let have = m.len();
+            if have > 0 && have < size && have % FILE_CHUNK_BYTES as u64 == 0 {
+                received = have;
+            }
+        }
+        let mut digest = Sha256::new();
+        let file = if received > 0 {
+            // Hash ulang byte yang sudah ada supaya verifikasi akhir tetap sah.
+            let mut f = File::open(&partial)?;
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut left = received;
+            while left > 0 {
+                let want = (left as usize).min(buf.len());
+                let n = f.read(&mut buf[..want])?;
+                if n == 0 { break }
+                digest.update(&buf[..n]);
+                left -= n as u64;
+            }
+            drop(f);
+            let f = std::fs::OpenOptions::new().append(true).open(&partial)?;
+            f
+        } else {
+            let f = File::create(&partial).with_context(|| format!("buat {}", partial.display()))?;
+            f
+        };
+
         let inbound = Inbound {
             path: path.clone(),
+            partial: partial.clone(),
             file,
-            digest: Sha256::new(),
+            digest,
             expected_sha: sha256.to_string(),
             expected_size: size,
-            received: 0,
-            next_idx: 0,
+            received,
+            next_idx: (received / FILE_CHUNK_BYTES as u64) as u32,
             ctx,
         };
         self.inbound.lock().unwrap().insert(msg_id.to_string(), inbound);
@@ -226,10 +301,10 @@ impl FileTransfer {
                 size,
                 sent_chunks: 0,
                 total_chunks,
-                received_bytes: 0,
+                received_bytes: received,
             },
         );
-        Ok(path)
+        Ok((path, received))
     }
 
     /// Tulis satu potongan. Mengembalikan `Some((path, konteks))` kalau file selesai & utuh.
@@ -279,11 +354,22 @@ impl FileTransfer {
         self.incoming.lock().unwrap().remove(msg_id);
 
         if actual != inb.expected_sha {
+            // Partial sengaja TIDAK dihapus di sini kalau isinya sudah lengkap tapi
+            // hash salah — itu tanda korupsi nyata, jadi lebih baik dibuang.
+            let _ = std::fs::remove_file(&inb.partial);
             let _ = std::fs::remove_file(&inb.path);
             bail!(
                 "sha256 tidak cocok (dapat {actual}, harus {}) — file dihapus",
                 inb.expected_sha
             );
+        }
+        // Pindahkan partial ke nama akhir hanya setelah terbukti utuh.
+        drop(inb.file);
+        if let Err(e) = std::fs::rename(&inb.partial, &inb.path) {
+            // Fallback kalau beda filesystem.
+            std::fs::copy(&inb.partial, &inb.path).with_context(|| format!("salin ke {}", inb.path.display()))?;
+            let _ = std::fs::remove_file(&inb.partial);
+            tracing::debug!("rename partial gagal ({e}), pakai copy");
         }
         Ok(Some((inb.path, inb.ctx)))
     }
@@ -304,6 +390,8 @@ impl FileTransfer {
         self.outgoing.lock().unwrap().remove(msg_id);
         if let Some(inb) = removed {
             let _ = std::fs::remove_file(&inb.path);
+            // Partial juga dihapus saat abort eksplisit (user membatalkan).
+            let _ = std::fs::remove_file(&inb.partial);
         }
     }
 
@@ -322,6 +410,11 @@ impl FileTransfer {
 }
 
 /// Hitung sha256 file utuh (dipakai test).
+/// sha256 dari potongan byte di memori (dipakai test & verifikasi kecil).
+pub fn sha256_file_bytes(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}
+
 pub fn sha256_file(path: &Path) -> Result<String> {
     let mut hasher = Sha256::new();
     let mut f = File::open(path)?;
@@ -343,6 +436,21 @@ pub fn now() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    /// Hitung file (rekursif), bukan direktori — layout sekarang punya `partial/`.
+    fn count_files(dir: &Path) -> usize {
+        let mut n = 0;
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                if e.path().is_dir() {
+                    n += count_files(&e.path());
+                } else {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
     use super::*;
     use std::io::Seek;
 
@@ -459,8 +567,9 @@ mod tests {
         }
         let msg = err.unwrap_or_else(|| "harusnya error".into());
         assert!(msg.contains("tidak cocok"), "pesan error: {msg}");
-        // tidak ada file tersisa di folder tujuan
-        let sisa = std::fs::read_dir(&dst).unwrap().count();
+        // tidak ada file tersisa di folder tujuan (folder `partial` boleh ada,
+        // tapi harus kosong — partial yang sha-nya salah dibuang)
+        let sisa = count_files(&dst);
         assert_eq!(sisa, 0, "file rusak harus dihapus");
     }
 
@@ -495,9 +604,9 @@ mod tests {
         let ft = FileTransfer::new();
         ft.begin_inbound(&dst, "m4", &meta.name, meta.size, &meta.sha256, meta.chunks)
             .unwrap();
-        assert_eq!(std::fs::read_dir(&dst).unwrap().count(), 1);
+        assert_eq!(count_files(&dst), 1, "harus ada 1 partial saat transfer jalan");
         ft.abort_inbound("m4");
-        assert_eq!(std::fs::read_dir(&dst).unwrap().count(), 0);
+        assert_eq!(count_files(&dst), 0, "abort harus menghapus partial");
         assert!(ft.incoming_progress("m4").is_none());
     }
 
@@ -505,7 +614,7 @@ mod tests {
     fn nama_file_dari_jaringan_tidak_bisa_keluar_folder() {
         let dst = tmpdir("traversal");
         let ft = FileTransfer::new();
-        let p = ft
+        let (p, _have) = ft
             .begin_inbound(&dst, "m5", "../../../etc/passwd", 10, "x", 1)
             .unwrap();
         // harus tetap di dalam folder tujuan
@@ -547,5 +656,68 @@ mod tests {
         f.seek(std::io::SeekFrom::Current(0)).unwrap();
         drop(f);
         assert_eq!(a, sha256_file(&p).unwrap());
+    
+    #[test]
+    fn resume_lanjut_dari_partial() {
+        let dir = std::env::temp_dir().join(format!("lanchat-resume-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // File uji 3 potongan penuh.
+        let chunk = crate::proto::FILE_CHUNK_BYTES;
+        let mut isi = vec![0u8; chunk * 3];
+        for (i, b) in isi.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        let sha = sha256_file_bytes(&isi);
+        let total = isi.len() as u64;
+        let chunks = (total / chunk as u64) as u32;
+
+        // Simulasikan: potongan pertama sudah diterima sebelumnya (partial 1 chunk).
+        let pdir = dir.join("partial");
+        std::fs::create_dir_all(&pdir).unwrap();
+        std::fs::write(pdir.join(format!("{sha}.part")), &isi[..chunk]).unwrap();
+
+        let ft = FileTransfer::new();
+        let (_path, have) = ft
+            .begin_inbound(&dir, "m1", "f.bin", total, &sha, chunks)
+            .expect("begin_inbound harus menerima resume");
+        assert_eq!(have, chunk as u64, "harus melanjutkan dari 1 potongan");
+
+        // Kirim potongan 2 dan 3 (indeks lanjut dari 1).
+        let mut done = None;
+        for idx in 1..3u32 {
+            let from = idx as usize * chunk;
+            let to = from + chunk;
+            let b64 = B64.encode(&isi[from..to]);
+            done = ft.write_chunk("m1", idx, &b64).unwrap();
+        }
+        let (path, _ctx) = done.expect("transfer harus selesai di potongan terakhir");
+        assert_eq!(std::fs::read(&path).unwrap(), isi, "isi file harus utuh");
+        assert_eq!(sha256_file_bytes(&std::fs::read(&path).unwrap()), sha);
+        assert!(!pdir.join(format!("{sha}.part")).exists(), "partial harus hilang setelah selesai");
+        let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn partial_tidak_valid_diabaikan() {
+        let dir = std::env::temp_dir().join(format!("lanchat-resume-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let chunk = crate::proto::FILE_CHUNK_BYTES;
+        let isi = vec![7u8; chunk * 2];
+        let sha = sha256_file_bytes(&isi);
+        let pdir = dir.join("partial");
+        std::fs::create_dir_all(&pdir).unwrap();
+        // Partial yang ukurannya BUKAN kelipatan potongan -> tidak boleh dipercaya.
+        std::fs::write(pdir.join(format!("{sha}.part")), vec![9u8; 123]).unwrap();
+
+        let ft = FileTransfer::new();
+        let (_p, have) = ft
+            .begin_inbound(&dir, "m2", "f.bin", isi.len() as u64, &sha, 2)
+            .unwrap();
+        assert_eq!(have, 0, "partial rusak harus diabaikan, mulai dari nol");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
 }

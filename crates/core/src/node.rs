@@ -203,7 +203,7 @@ struct Inner {
     files_dir: PathBuf,
     transfers: FileTransfer,
     /// offer yang sedang menunggu jawaban peer: msg_id → (accept_tx, done_tx)
-    pending_accept: Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
+    pending_accept: Mutex<HashMap<String, tokio::sync::oneshot::Sender<(bool, u64)>>>,
     pending_done: Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
     tls: Tls,
     identity: Identity,
@@ -449,6 +449,47 @@ impl Node {
     ///
     /// Alur: offer → tunggu accept → stream chunk → tunggu done.
     /// Semua langkah punya timeout supaya UI tidak menggantung kalau peer diam.
+    /// Kirim file ke beberapa peer (grup) dalam satu panggilan.
+    ///
+    /// Tiap penerima menerima salinan penuh langsung dari kita — bukan di-relay
+    /// lewat satu anggota — karena semua node setara. Mengembalikan id pesan
+    /// pertama yang berhasil; kegagalan sebagian dilaporkan lewat `warn`.
+    pub async fn send_file_many(
+        &self,
+        targets: &[String],
+        path: &Path,
+        timeout_secs: u64,
+    ) -> Result<String> {
+        if targets.is_empty() {
+            bail!("tidak ada penerima");
+        }
+        let mut first: Option<String> = None;
+        let mut errors: Vec<String> = Vec::new();
+        for t in targets {
+            match self.send_file(t, path, timeout_secs).await {
+                Ok(id) => {
+                    if first.is_none() {
+                        first = Some(id);
+                    }
+                }
+                Err(e) => errors.push(format!("{t}: {e}")),
+            }
+        }
+        match first {
+            Some(id) => {
+                if !errors.is_empty() {
+                    self.emit(Event::Warn(format!(
+                        "file gagal terkirim ke {} penerima: {}",
+                        errors.len(),
+                        errors.join("; ")
+                    )));
+                }
+                Ok(id)
+            }
+            None => bail!("gagal mengirim file ke semua penerima: {}", errors.join("; ")),
+        }
+    }
+
     pub async fn send_file(&self, to: &str, path: &Path, timeout_secs: u64) -> Result<String> {
         let meta = FileTransfer::prepare(path)?;
         let tx = self
@@ -488,7 +529,7 @@ impl Node {
         }
 
         // tunggu keputusan peer
-        let accepted = match tokio::time::timeout(
+        let (accepted, resume_from) = match tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
             accept_rx,
         )
@@ -537,7 +578,7 @@ impl Node {
         let meta_for_task = meta.clone();
         let tx_for_task = tx.clone();
         let result = tokio::task::spawn_blocking(move || {
-            transfers.stream_file(&msg_id_clone, &path_owned, &meta_for_task, |f| {
+            transfers.stream_file_from(&msg_id_clone, &path_owned, &meta_for_task, resume_from, |f| {
                 tx_for_task.try_send(f).is_ok()
             })
         })
@@ -1221,15 +1262,15 @@ impl Node {
                         ts,
                     },
                 );
-                let accept = match res {
-                    Ok(_) => true,
+                let (accept, have) = match res {
+                    Ok((_path, have)) => (true, have),
                     Err(e) => {
                         self.emit(Event::FileFailed {
                             id: id.clone(),
                             name: name.clone(),
                             reason: e.to_string(),
                         });
-                        false
+                        (false, 0)
                     }
                 };
                 // guard diambil & dilepas sebelum await (kalau tidak, future jadi !Send)
@@ -1244,6 +1285,7 @@ impl Node {
                             } else {
                                 "penerima gagal menyiapkan file".into()
                             },
+                            have,
                         })
                         .await;
                 }
@@ -1324,9 +1366,10 @@ impl Node {
                     }
                 }
             }
-            Frame::FileAccept { id, accept, .. } => {
+            Frame::FileAccept { id, accept, have, .. } => {
                 if let Some(tx) = self.0.pending_accept.lock().unwrap().remove(&id) {
-                    let _ = tx.send(accept);
+                    // Bawa juga posisi resume; pengirim memutuskan mulai dari mana.
+                    let _ = tx.send((accept, have));
                 }
             }
             Frame::FileDone { id, ok, .. } => {

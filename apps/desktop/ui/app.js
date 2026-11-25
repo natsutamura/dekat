@@ -951,9 +951,7 @@ async function boot() {
   $("btn-new").onclick = newChatModal;
   $("btn-settings").onclick = settingsModal;
   $("btn-attach").onclick = async () => {
-    if (!S.active) return toast("Pilih chat dulu", "Lampiran hanya bisa dikirim di chat pribadi");
-    const t = S.threads.find((x) => x.id === S.active);
-    if (t && t.kind !== "dm") return toast("Belum bisa", "Kirim file untuk sementara hanya di chat pribadi (DM)");
+    if (!S.active) return toast("Pilih chat dulu", "Lampiran butuh percakapan aktif");
     try {
       const r = await invoke("send_file", { threadId: S.active });
       if (r === "dibatalkan") return;

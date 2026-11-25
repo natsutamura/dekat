@@ -180,6 +180,9 @@ pub enum Frame {
         accept: bool,
         #[serde(default)]
         reason: String,
+        /// Byte yang sudah dimiliki penerima (untuk resume). 0 = mulai dari awal.
+        #[serde(default)]
+        have: u64,
     },
     /// Terima kasih: file utuh & terverifikasi.
     FileDone {

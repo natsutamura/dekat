@@ -3,6 +3,7 @@
 //! Yang diuji: handshake, pengiriman DM + ack, pesan grup (fan-out), typing.
 //! Tidak butuh jaringan luar — semua lewat loopback.
 
+use base64::Engine as _;
 use lanchat_core::{Config, Event, Node};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -667,4 +668,90 @@ async fn profil_bertahan_setelah_restart() {
     let n2 = Node::start(cfg).await.unwrap();
     assert_eq!(n2.id(), id1, "id harus tetap sama setelah restart");
     assert_eq!(n2.name(), "Nama Baru", "nama kustom harus bertahan");
+}
+
+// ---------------- file: grup & resume ----------------
+
+/// Kirim file ke dua peer sekaligus (satu panggilan) — keduanya harus utuh.
+#[tokio::test]
+async fn kirim_file_ke_dua_peer_sekaligus() {
+    let a = Node::start(cfg("a")).await.unwrap();
+    let b = Node::start(cfg("b")).await.unwrap();
+    let c = Node::start(cfg("c")).await.unwrap();
+    for y in [&b, &c] {
+        let x = a.clone();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), y.port());
+        tokio::spawn(async move { let _ = x.connect_peer(addr).await; });
+    }
+    for _ in 0..80 {
+        if a.is_connected(b.id()) && a.is_connected(c.id()) { break }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(a.is_connected(b.id()) && a.is_connected(c.id()));
+
+    // File 200 KB supaya lebih dari satu potongan.
+    let src = tmp_dir("kirim").join("grup.bin");
+    let isi: Vec<u8> = (0..200_000).map(|i| (i % 253) as u8).collect();
+    std::fs::write(&src, &isi).unwrap();
+    let sha = lanchat_core::files::sha256_file(&src).unwrap();
+
+    let targets = vec![b.id().to_string(), c.id().to_string()];
+    let id = a.send_file_many(&targets, &src, 30).await.expect("kirim ke dua peer gagal");
+    assert!(!id.is_empty());
+
+    // Kedua penerima harus punya file dengan sha yang sama.
+    for (nama, node) in [("b", &b), ("c", &c)] {
+        let mut found = false;
+        for _ in 0..100 {
+            let dir = node.files_dir();
+            if let Ok(rd) = std::fs::read_dir(&dir) {
+                for e in rd.flatten() {
+                    if e.path().extension().and_then(|x| x.to_str()) == Some("bin") {
+                        if lanchat_core::files::sha256_file(&e.path()).unwrap_or_default() == sha {
+                            found = true;
+                        }
+                    }
+                }
+            }
+            if found { break }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(found, "peer {nama} tidak menerima file utuh");
+    }
+}
+
+/// Resume: kalau penerima sudah punya sebagian, pengirim hanya mengirim sisanya.
+///
+/// Diuji di level files.rs (bukan lewat jaringan) karena menghentikan transfer di
+/// tengah koneksi nyata tidak deterministik.
+#[tokio::test]
+async fn resume_transfer_melanjutkan_dari_posisi_terakhir() {
+    use lanchat_core::files::FileTransfer;
+
+    let dir = tmp_dir("resume");
+    let chunk = lanchat_core::proto::FILE_CHUNK_BYTES;
+    let isi: Vec<u8> = (0..chunk * 4).map(|i| (i % 241) as u8).collect();
+    let sha = lanchat_core::files::sha256_file_bytes(&isi);
+
+    // Penerima sudah punya 2 potongan pertama dari percobaan sebelumnya.
+    let pdir = dir.join("partial");
+    std::fs::create_dir_all(&pdir).unwrap();
+    std::fs::write(pdir.join(format!("{sha}.part")), &isi[..chunk * 2]).unwrap();
+
+    let ft = FileTransfer::new();
+    let (_path, have) = ft
+        .begin_inbound(&dir, "baru", "data.bin", isi.len() as u64, &sha, 4)
+        .unwrap();
+    assert_eq!(have, (chunk * 2) as u64, "harus melapor sudah punya 2 potongan");
+
+    // Kirim sisa potongan 3 & 4 saja.
+    let mut done = None;
+    for idx in 2..4u32 {
+        let b64 = base64::engine::general_purpose::STANDARD.encode(
+            &isi[idx as usize * chunk..(idx as usize + 1) * chunk],
+        );
+        done = ft.write_chunk("baru", idx, &b64).unwrap();
+    }
+    let (path, _) = done.expect("transfer harus selesai");
+    assert_eq!(lanchat_core::files::sha256_file(&path).unwrap(), sha, "hasil resume harus utuh");
 }

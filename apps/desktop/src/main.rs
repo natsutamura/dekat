@@ -110,6 +110,28 @@ fn me_of(node: &Node) -> Me {
     }
 }
 
+/// Peer tujuan untuk sebuah thread.
+///
+/// DM: satu peer. Grup: semua anggota yang sedang terhubung — file dikirim
+/// langsung ke tiap anggota (bukan di-relay lewat satu orang), sesuai model P2P.
+fn targets_for(st: &App, thread: &Thread) -> Vec<String> {
+    let connected: Vec<String> = st.node.peers().into_iter().map(|p| p.id).collect();
+    if thread.kind == "dm" {
+        return if connected.iter().any(|id| id == &thread.id) {
+            vec![thread.id.clone()]
+        } else {
+            Vec::new()
+        };
+    }
+    thread
+        .members
+        .iter()
+        .filter(|id| *id != &st.node.id())
+        .filter(|id| connected.iter().any(|c| c == *id))
+        .cloned()
+        .collect()
+}
+
 /// Ganti nama tampilan (bukan nama PC). Berlaku langsung ke semua peer.
 #[tauri::command]
 fn set_display_name(state: State<AppState>, name: String) -> Result<Me, String> {
@@ -356,8 +378,9 @@ async fn send_file(
         .thread(&threadId)
         .map_err(e2s)?
         .ok_or_else(|| "thread tidak dikenal".to_string())?;
-    if t.kind != "dm" {
-        return Err("kirim file untuk sementara hanya di chat pribadi (DM)".into());
+    let targets = targets_for(&st, &t);
+    if targets.is_empty() {
+        return Err("tidak ada anggota yang online di percakapan ini".into());
     }
 
     let name = path
@@ -366,7 +389,8 @@ async fn send_file(
         .unwrap_or_else(|| "file".into());
     let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
-    match st.node.send_file(&t.id, &path, 30).await {
+    // Kirim ke semua target; satu pesan disimpan walau penerimanya banyak.
+    match st.node.send_file_many(&targets, &path, 30).await {
         Ok(msg_id) => {
             let m = StoredMessage {
                 id: msg_id.clone(),
@@ -412,9 +436,6 @@ async fn send_file_path(
         .thread(&threadId)
         .map_err(e2s)?
         .ok_or_else(|| "thread tidak dikenal".to_string())?;
-    if t.kind != "dm" {
-        return Err("kirim file untuk sementara hanya di chat pribadi (DM)".into());
-    }
     let p = std::path::PathBuf::from(&path);
     let name = p
         .file_name()
@@ -423,9 +444,13 @@ async fn send_file_path(
     let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
     let sha = lanchat_core::files::sha256_file(&p).unwrap_or_default();
 
+    let targets = targets_for(&st, &t);
+    if targets.is_empty() {
+        return Err("tidak ada anggota yang online di percakapan ini".into());
+    }
     let msg_id = st
         .node
-        .send_file(&t.id, &p, 30)
+        .send_file_many(&targets, &p, 30)
         .await
         .map_err(|e| e.to_string())?;
 
