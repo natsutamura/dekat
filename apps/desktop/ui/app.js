@@ -619,6 +619,54 @@ function openModal(html) {
 function closeModal() { $("modal").hidden = true; }
 
 /* ---------------- modal: pengaturan ---------------- */
+/* ---------------- modal: pairing (QR) ---------------- */
+async function pairingModal() {
+  let p;
+  try {
+    p = await invoke("pairing_qr");
+  } catch (err) {
+    return toast("Gagal buat QR", String(err));
+  }
+  openModal(`
+    <h3>Pairing</h3>
+    <div class="hint" style="margin:0 0 10px">Tunjukkan QR ini ke perangkat lain, atau tempel kode dari mereka.</div>
+    <div class="pair-qr">${p.svg}</div>
+    <div class="pair-uri" id="pair-uri">${escapeAttr(p.uri)}</div>
+    <label class="field" style="margin-top:10px">
+      <span>Kode perangkat lain</span>
+      <input type="text" id="pair-input" placeholder="lanchat://192.168.1.5:41234" autocomplete="off">
+    </label>
+    <div class="hint" id="pair-hint">Keduanya harus di WiFi/LAN yang sama.</div>
+    <div class="actions">
+      <button class="btn" id="pair-copy">Salin kodeku</button>
+      <button class="btn primary" id="pair-add">Sambungkan</button>
+    </div>`);
+
+  $("pair-copy").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(p.uri);
+      $("pair-hint").textContent = "Kode disalin: " + p.uri;
+    } catch (_) {
+      $("pair-hint").textContent = p.uri;
+    }
+  };
+
+  $("pair-add").onclick = async () => {
+    const v = $("pair-input").value.trim();
+    if (!v) return;
+    $("pair-hint").textContent = "Menyambungkan…";
+    try {
+      const addr = await invoke("add_peer_uri", { uri: v });
+      $("pair-hint").textContent = "Tersambung ke " + addr;
+      // Peer list ikut ter-update lewat event lc://peers dari Rust.
+      S.peers = await invoke("peers");
+      renderPeers();
+    } catch (err) {
+      $("pair-hint").textContent = "Gagal: " + String(err);
+    }
+  };
+}
+
 function settingsModal() {
   const s = S.settings;
   const colors = ["#0b84ff", "#34c759", "#ff375f", "#af52de", "#ff9f0a", "#5e5ce6", "#2c2c2e", "#00c7be"];
@@ -655,6 +703,9 @@ function settingsModal() {
       <input type="range" id="st-scale" min="0.8" max="1.6" step="0.05" value="${s.scale}">
     </div>
     <div class="hint">Ctrl + scroll, Ctrl + / Ctrl − , atau Ctrl 0 buat zoom cepat. Window bisa di-resize bebas.</div>
+    <div class="row-line"><span>Pairing</span>
+      <button class="btn sm" id="pf-pair">Tambah peer lewat QR…</button>
+    </div>
     <div class="actions">
       <button class="btn" id="st-reset">Reset</button>
       <button class="btn primary" id="st-done">Selesai</button>
@@ -712,6 +763,8 @@ function settingsModal() {
     };
     input.click();
   };
+
+  $("pf-pair").onclick = pairingModal;
 
   $("pf-photo-clear").onclick = async () => {
     try {

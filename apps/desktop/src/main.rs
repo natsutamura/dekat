@@ -132,6 +132,103 @@ fn targets_for(st: &App, thread: &Thread) -> Vec<String> {
         .collect()
 }
 
+/// Info pairing: URI yang bisa dibagikan (QR / teks) + QR sebagai SVG.
+#[derive(Serialize)]
+struct Pairing {
+    uri: String,
+    svg: String,
+    ip: String,
+    port: u16,
+}
+
+/// Buat URI pairing untuk node ini.
+///
+/// Format `lanchat://<ip>:<port_discovery>` — port discovery (UDP), bukan port
+/// TCP, karena yang dibutuhkan peer baru adalah alamat untuk announce unicast.
+#[tauri::command]
+fn pairing_qr(state: State<AppState>) -> Result<Pairing, String> {
+    let _ = state; // port TCP tidak diperlukan di URI
+    build_pairing(&lanchat_core::discovery::local_ip().to_string(), lanchat_core::proto::DISCOVERY_PORT)
+}
+
+/// Bagian murni dari `pairing_qr` supaya bisa diuji tanpa menjalankan app.
+fn build_pairing(ip: &str, port: u16) -> Result<Pairing, String> {
+    let uri = format!("lanchat://{ip}:{port}");
+    // SVG, bukan PNG: tidak butuh dependensi encoder gambar dan tetap tajam.
+    let code = qrcode::QrCode::new(uri.as_bytes()).map_err(|e| format!("gagal buat QR: {e}"))?;
+    let svg = code
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(220, 220)
+        .quiet_zone(true)
+        .dark_color(qrcode::render::svg::Color("#000000"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build();
+    // Buang deklarasi XML: SVG ini disuntik ke innerHTML, dan `<?xml?>` di HTML
+    // berubah jadi komentar — tidak fatal, tapi bikin markup-nya berantakan.
+    let svg = match svg.find("<svg") {
+        Some(i) => svg[i..].to_string(),
+        None => svg,
+    };
+    Ok(Pairing { uri, svg, ip: ip.to_string(), port })
+}
+
+#[cfg(test)]
+mod pairing_tests {
+    use super::*;
+
+    #[test]
+    fn qr_berisi_uri_yang_benar() {
+        let p = build_pairing("192.168.1.5", 41234).unwrap();
+        assert_eq!(p.uri, "lanchat://192.168.1.5:41234");
+        assert!(p.svg.starts_with("<svg"), "harus SVG: {}", &p.svg[..40.min(p.svg.len())]);
+        assert!(p.svg.len() > 500, "SVG terlalu kecil, QR mungkin kosong");
+    }
+
+    #[test]
+    fn uri_pairing_diterima_dalam_beberapa_bentuk() {
+        for s in [
+            "lanchat://192.168.1.5:41234",
+            "  192.168.1.5:41234  ",
+            "lanchat://192.168.1.5:41234/",
+            "lanchat://192.168.1.5:41234\n",
+        ] {
+            let a = parse_pairing_uri(s).unwrap_or_else(|e| panic!("{s} gagal: {e}"));
+            assert_eq!(a.to_string(), "192.168.1.5:41234", "input: {s}");
+        }
+    }
+
+    #[test]
+    fn uri_pairing_salah_ditolak() {
+        for s in ["", "bukan alamat", "lanchat://", "192.168.1.5", "http://x:1"] {
+            assert!(parse_pairing_uri(s).is_err(), "harusnya ditolak: {s}");
+        }
+    }
+}
+
+/// Tambah peer dari URI pairing (hasil scan QR / tempel teks).
+///
+/// Mencoba koneksi langsung ke alamat itu, jadi peer langsung muncul tanpa
+/// menunggu multicast — berguna di jaringan yang memblokir multicast.
+#[tauri::command]
+async fn add_peer_uri(state: State<'_, AppState>, uri: String) -> Result<String, String> {
+    let addr = parse_pairing_uri(&uri)?;
+    state
+        .node
+        .connect_peer(addr)
+        .await
+        .map_err(|e| format!("gagal menyambung ke {addr}: {e}"))?;
+    Ok(addr.to_string())
+}
+
+/// Terima `lanchat://ip:port`, `ip:port`, atau URL dengan spasi/newline.
+fn parse_pairing_uri(raw: &str) -> Result<std::net::SocketAddr, String> {
+    let cleaned = raw.trim().trim_start_matches("lanchat://");
+    let cleaned = cleaned.split(['/', '?', '\n', ' ']).next().unwrap_or(cleaned);
+    cleaned
+        .parse()
+        .map_err(|_| format!("format tidak dikenal: {raw} (contoh: lanchat://192.168.1.5:41234)"))
+}
+
 /// Ganti nama tampilan (bukan nama PC). Berlaku langsung ke semua peer.
 #[tauri::command]
 fn set_display_name(state: State<AppState>, name: String) -> Result<Me, String> {
@@ -1169,6 +1266,8 @@ fn main() {
             clear_chat,
             set_status,
             set_display_name,
+            pairing_qr,
+            add_peer_uri,
             set_my_avatar,
             clear_my_avatar,
             set_setting,

@@ -27,10 +27,23 @@
     muted: false,
     startedAt: 0,
     incoming: null,
+    // Deteksi siapa yang sedang bicara
+    audioCtx: null,
+    analysers: new Map(), // peerId -> { analyser, data, el }
+    speakTimer: null,
+    deviceId: null,       // mikrofon yang dipilih user
   };
 
   let bar, btnMute, btnEnd, timerEl, nameEl, stateEl, iconEl;
   let nameOf = (id) => String(id || "?").slice(0, 6);
+
+  /** Escape untuk innerHTML. Lokal, supaya call.js tidak bergantung pada app.js. */
+  const esc = (v) =>
+    String(v == null ? "" : v)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
 
   /* ---------- elemen ---------- */
   function buildBar() {
@@ -43,8 +56,14 @@
       <div class="call-meta">
         <div class="call-name" id="call-name">—</div>
         <div class="call-state" id="call-state">menghubungkan…</div>
+        <div class="call-participants" id="call-parts"></div>
       </div>
       <div class="call-timer" id="call-timer">00:00</div>
+      <button class="call-btn" id="call-mic" title="Pilih mikrofon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/>
+        </svg>
+      </button>
       <button class="call-btn" id="call-mute" title="Bisukan mikrofon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/>
@@ -64,6 +83,7 @@
     iconEl = document.getElementById("call-av");
     btnMute.onclick = toggleMute;
     btnEnd.onclick = () => hangup("ditutup");
+    document.getElementById("call-mic").onclick = micMenu;
   }
 
   function setState(text, kind) {
@@ -128,6 +148,10 @@
       document.body.appendChild(audio);
       audio.play().catch(() => {});
       entry.audio = audio;
+      const w = watchLevel(stream, null);
+      if (w) S.analysers.set(peerId, w);
+      renderParticipants();
+      startSpeakingLoop();
       S.state = "active";
       setState(isGroup() ? `${S.pcs.size + 1} peserta tersambung` : "tersambung", "active");
       startTimer();
@@ -148,6 +172,111 @@
     return entry;
   }
 
+  /** Tampilkan avatar peserta (untuk indikator bicara & siapa saja di panggilan). */
+  function renderParticipants() {
+    const box = document.getElementById("call-parts");
+    if (!box) return;
+    if (!isGroup()) {
+      box.innerHTML = "";
+      return;
+    }
+    const ids = ["self", ...Array.from(S.pcs.keys())];
+    box.innerHTML = ids
+      .map((id) => {
+        const label = id === "self" ? "Kamu" : nameOf(id);
+        const initial = String(label).trim().charAt(0).toUpperCase() || "?";
+        return `<span class="call-p" data-peer="${esc(id)}" title="${esc(label)}">${esc(initial)}</span>`;
+      })
+      .join("");
+  }
+
+  /** Menu pilih mikrofon. */
+  async function micMenu() {
+    const mics = await listMics();
+    if (!mics.length) return setState("tidak ada mikrofon terdeteksi", "error");
+    if (mics.length === 1) return setState("hanya satu mikrofon", "active");
+    const r = btnMute.getBoundingClientRect();
+    const items = mics.map((m) => ({
+      label: (S.deviceId === m.id ? "✓ " : "") + m.label,
+      run: () => switchMic(m.id),
+    }));
+    // showMenu dari app.js (global), dipakai bersama menu lain.
+    showMenu(r.left - 120, r.top - items.length * 36 - 12, items);
+  }
+
+  /* ---------- deteksi bicara ---------- */
+  function audioCtx() {
+    if (!S.audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      S.audioCtx = new Ctx();
+    }
+    // Browser men-suspend AudioContext sampai ada interaksi user.
+    if (S.audioCtx.state === "suspended") S.audioCtx.resume().catch(() => {});
+    return S.audioCtx;
+  }
+
+  /** Pantau level audio sebuah stream, panggil cb(level 0..1) tiap ~100ms. */
+  function watchLevel(stream, cb) {
+    const ctx = audioCtx();
+    if (!ctx || !stream) return null;
+    try {
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.6;
+      src.connect(analyser);
+      return { analyser, data: new Uint8Array(analyser.frequencyBinCount), cb };
+    } catch (_) {
+      return null; // stream tanpa track audio
+    }
+  }
+
+  /** Satu timer untuk semua peserta: hitung RMS, tandai elemen yang bicara. */
+  function startSpeakingLoop() {
+    if (S.speakTimer) return;
+    S.speakTimer = setInterval(() => {
+      let any = false;
+      for (const [peerId, w] of S.analysers) {
+        w.analyser.getByteTimeDomainData(w.data);
+        let sum = 0;
+        for (let i = 0; i < w.data.length; i++) {
+          const v = (w.data[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / w.data.length);
+        // Ambang 0.02 ≈ suara bicara normal; di bawah itu dianggap diam.
+        const speaking = rms > 0.02 && !S.muted;
+        if (speaking) any = true;
+        const el = document.querySelector(`.call-av[data-peer="${peerId}"]`);
+        if (el) el.classList.toggle("speaking", speaking);
+      }
+      // Indikator mikrofon sendiri.
+      const self = document.querySelector('.call-av[data-peer="self"]');
+      if (self && S.local) {
+        const w = S.analysers.get("self");
+        if (w) {
+          w.analyser.getByteTimeDomainData(w.data);
+          let sum = 0;
+          for (let i = 0; i < w.data.length; i++) {
+            const v = (w.data[i] - 128) / 128;
+            sum += v * v;
+          }
+          const speaking = Math.sqrt(sum / w.data.length) > 0.02 && !S.muted;
+          self.classList.toggle("speaking", speaking);
+          if (speaking) any = true;
+        }
+      }
+      if (bar) bar.classList.toggle("someone-speaking", any);
+    }, 100);
+  }
+
+  function stopSpeakingLoop() {
+    clearInterval(S.speakTimer);
+    S.speakTimer = null;
+    S.analysers.clear();
+  }
+
   function addPeerPc(peerId) {
     if (S.pcs.has(peerId)) return S.pcs.get(peerId);
     const entry = newPc(peerId);
@@ -156,12 +285,46 @@
     return entry;
   }
 
-  async function getMic() {
+  async function getMic(deviceId) {
     // echoCancellation bikin suara lawan tidak balik ke dia
-    return navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      video: false,
-    });
+    const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    // `exact` supaya browser tidak diam-diam memakai device lain.
+    if (deviceId) audio.deviceId = { exact: deviceId };
+    return navigator.mediaDevices.getUserMedia({ audio, video: false });
+  }
+
+  /** Ganti mikrofon saat panggilan berjalan, tanpa memutus panggilan. */
+  async function switchMic(deviceId) {
+    if (!S.local) return;
+    let next;
+    try {
+      next = await getMic(deviceId);
+    } catch (e) {
+      setState("mikrofon gagal diganti", "error");
+      return;
+    }
+    const track = next.getAudioTracks()[0];
+    // Tukar track di semua koneksi; RTCRtpSender.replaceTrack tidak butuh
+    // negosiasi ulang, jadi audio tidak terputus.
+    for (const entry of S.pcs.values()) {
+      const sender = entry.pc.getSenders().find((s) => s.track && s.track.kind === "audio");
+      if (sender) await sender.replaceTrack(track).catch(() => {});
+    }
+    S.local.getTracks().forEach((t) => t.stop());
+    S.local = next;
+    S.deviceId = deviceId;
+    const w = watchLevel(next, null);
+    if (w) S.analysers.set("self", w);
+    setState("mikrofon diganti", "active");
+  }
+
+  /** Daftar mikrofon yang tersedia (butuh izin mikrofon lebih dulu). */
+  async function listMics() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
+    const all = await navigator.mediaDevices.enumerateDevices();
+    return all
+      .filter((d) => d.kind === "audioinput")
+      .map((d, i) => ({ id: d.deviceId, label: d.label || `Mikrofon ${i + 1}` }));
   }
 
   function waitIce(pc, timeoutMs = 1500) {
@@ -213,11 +376,17 @@
     setState("memanggil…", "calling");
 
     try {
-      S.local = await getMic();
+      S.local = await getMic(S.deviceId);
     } catch (e) {
       setState("mikrofon ditolak", "error");
       setTimeout(() => cleanup(), 1500);
       return;
+    }
+    {
+      const w = watchLevel(S.local, null);
+      if (w) S.analysers.set("self", w);
+      renderParticipants();
+      startSpeakingLoop();
     }
 
     let ok = 0;
@@ -249,7 +418,7 @@
     setState("menyambung…", "connecting");
 
     try {
-      S.local = await getMic();
+      S.local = await getMic(S.deviceId);
     } catch (e) {
       setState("mikrofon ditolak", "error");
       invoke("call_answer", {
@@ -279,6 +448,14 @@
 
     S.incoming = null;
     closeIncomingPopup();
+    // Setelah mic siap, tampilkan peserta (termasuk diri sendiri) dan mulai
+    // memantau level suara.
+    {
+      const w = watchLevel(S.local, null);
+      if (w) S.analysers.set("self", w);
+      renderParticipants();
+      startSpeakingLoop();
+    }
 
     // 2. Sambung ke peserta lain (mesh). Hanya yang id-nya lebih besar dari kita,
     //    supaya pasangan yang sama tidak membuat dua koneksi.
@@ -301,6 +478,8 @@
         console.warn("mesh gagal", pid, e);
       }
     }
+    // Semua koneksi sudah dibuat: tampilkan seluruh peserta.
+    renderParticipants();
   }
 
   function rejectCall(reason = "ditolak") {
@@ -368,6 +547,10 @@
 
   function cleanup() {
     clearInterval(S._timer);
+    stopSpeakingLoop();
+    if (bar) bar.classList.remove("someone-speaking");
+    const parts = document.getElementById("call-parts");
+    if (parts) parts.innerHTML = "";
     S.pcs.forEach((e) => {
       try {
         e.pc.close();
@@ -497,6 +680,9 @@
     peerCount: () => S.pcs.size,
     members: () => S.members.slice(),
     // hook uji otomatis
+    switchMic,
+    listMics,
+    speaking: () => Array.from(document.querySelectorAll(".call-p.speaking")).map((e) => e.dataset.peer),
     _pcs: () => Array.from(S.pcs.values()).map((e) => e.pc),
     _local: () => S.local,
   };

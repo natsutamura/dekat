@@ -193,6 +193,20 @@ body{
 ::-webkit-scrollbar{width:9px} ::-webkit-scrollbar-thumb{background:rgba(142,142,147,.4);border-radius:5px}
 ::-webkit-scrollbar-track{background:transparent}
 
+/* ---------------- indikator bicara ---------------- */
+.call-participants{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
+.call-p{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;
+        font-size:11px;font-weight:600;background:var(--input-bg);color:var(--text-2);
+        border:2px solid transparent;transition:border-color .12s,color .12s}
+.call-p.speaking{border-color:var(--online);color:var(--text)}
+.callbar.someone-speaking{box-shadow:0 0 0 1px var(--online) inset}
+
+/* ---------------- pairing ---------------- */
+.pair-qr{display:flex;justify-content:center;background:#fff;padding:10px;border-radius:12px}
+.pair-qr svg{width:200px;height:200px;display:block}
+.pair-uri{margin-top:8px;font-family:ui-monospace,monospace;font-size:12px;text-align:center;
+          color:var(--text-2);word-break:break-all}
+
 /* ---------------- avatar foto & form profil ---------------- */
 .avatar{overflow:hidden;position:relative}
 .avatar img{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}

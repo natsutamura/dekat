@@ -20,3 +20,4 @@ tauri-plugin-opener = "2.7.3"
 tauri-plugin-notification = "2.8.1"
 arboard = { version = "3.7.0", default-features = false, features = ["image-data"] }
 png = "0.18.1"
+qrcode = "0.15.0"

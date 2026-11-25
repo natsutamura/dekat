@@ -26,8 +26,8 @@ keduanya cuma konsumen event.
 | **M2** ✅ | **selesai**: sidebar + thread, bubble, dark/light, chat bar, avatar + status dot, clear chat, mark read/unread, notifikasi OS + taskbar flash, zoom, resize, custom bubble, centang abu/biru, **nama tampilan kustom (bukan nama PC) + foto profil** dikirim lewat frame `Profile`. **belum**: foto grup (opsional) | app desktop bisa dipakai harian |
 | **M3** ✅ | **selesai**: kirim file chunked (128 KiB) + sha256 + progress + tolak chunk rusak + drag & drop + CLI `/file` + gambar inline & lightbox + paste gambar (Ctrl+V) + **kirim file di grup (fan-out ke semua anggota)** + **resume otomatis lewat partial per-sha256**. | kirim file antar perangkat |
 | **M4** | Android: build Tauri mobile, `MulticastLock`, izin `NEARBY_WIFI_DEVICES` (API 33+), notifikasi lokal, foreground service | HP Android chat di LAN yang sama |
-| **M5** 🟡 | **selesai**: WebRTC audio 1:1, signalling via TCP, popup panggilan masuk, mute, timer, tanpa STUN/TURN, **panggilan grup (mesh penuh, roster di CallOffer, aturan dial id>self)**. **belum**: video, device picker, indikator speaking | panggilan suara antar perangkat |
-| **M6** 🟡 | **selesai**: installer Windows **MSI + NSIS** (AUMID → notifikasi jalan), **Linux AppImage + deb + tar.gz + PKGBUILD Arch**. **belum**: pairing QR, pengaturan nama/foto, updater, code signing | rilis v1.0 |
+| **M5** 🟡 | **selesai**: WebRTC audio 1:1, signalling via TCP, popup panggilan masuk, mute, timer, panggilan grup (mesh penuh), **indikator bicara (RMS per peserta)**, **pilih mikrofon saat panggilan berjalan (replaceTrack)**. **belum**: video call | panggilan suara antar perangkat |
+| **M6** 🟡 | **selesai**: installer Windows MSI+NSIS (AUMID), Linux AppImage+deb+tar.gz+PKGBUILD, pengaturan nama/foto, **pairing QR + tempel kode**. **belum**: updater (butuh URL publik — repo private), code signing (butuh sertifikat berbayar) | rilis v1.0 |
 
 ## Pemetaan fitur yang diminta
 
