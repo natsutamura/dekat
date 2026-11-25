@@ -3,7 +3,7 @@
 set -u
 export DISPLAY=:11 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1
 BIN=${BIN:-/root/lanchat/target/debug/lanchat-desktop}
-pkill -9 -f 'lanchat-desktop' 2>/dev/null; sleep 2
+pkill -9 -x lanchat-desktop 2>/dev/null; sleep 2
 
 python3 - <<'PY'
 import sqlite3, os

@@ -7,10 +7,26 @@ export WEBKIT_DISABLE_DMABUF_RENDERER=1
 export WEBKIT_DISABLE_COMPOSITING_MODE=1
 export LIBGL_ALWAYS_SOFTWARE=1
 BIN=${BIN:-/root/lanchat/target/debug/lanchat-desktop}
+
+# Aktifkan window dan PASTIKAN fokus benar sebelum mengetik.
+# xdotool type mengirim ke window yang fokus, jadi kalau aktivasi gagal,
+# teks bisa masuk ke window lain (ini yang bikin hasil uji jadi palsu).
+focus_win() {
+  local w=$1 i
+  for i in 1 2 3 4 5 6; do
+    xdotool windowactivate --sync "$w" 2>/dev/null
+    sleep 0.5
+    if [ "$(xdotool getwindowfocus)" = "$w" ]; then return 0; fi
+    sleep 0.7
+  done
+  echo "FAIL: tidak bisa fokus ke window $w"
+  return 1
+}
+
 OUT=/tmp/e2e-ui
 rm -rf $OUT; mkdir -p $OUT
 
-pkill -9 -f 'lanchat-desktop' 2>/dev/null
+pkill -9 -x lanchat-desktop 2>/dev/null
 sleep 2
 rm -rf /root/.lanchat-ray /root/.lanchat-iphone
 
@@ -32,7 +48,7 @@ echo "ray=$RAY iphone=$IPH"
 xdotool windowsize $RAY 900 600;  xdotool windowmove $RAY 0 30
 xdotool windowsize $IPH 900 600;  xdotool windowmove $IPH 930 30
 sleep 3
-xdotool windowactivate --sync $RAY; sleep 2
+focus_win $RAY || exit 1
 import -window $RAY $OUT/01-ray-boot.png
 
 # --- klik peer iphone di sidebar ray ---
@@ -46,7 +62,7 @@ xdotool key Return; sleep 3
 import -window $RAY $OUT/03-ray-sent.png
 
 # --- balas dari iphone ---
-xdotool windowactivate --sync $IPH; sleep 1.5
+focus_win $IPH || exit 1
 # iphone sudah punya thread di PERCAKAPAN (y~151), coba itu dulu
 xdotool mousemove --window $IPH 120 151 click 1; sleep 1.5
 xdotool mousemove --window $IPH 120 205 click 1; sleep 1.5
@@ -56,12 +72,13 @@ xdotool type --delay 45 'diterima, ini balasan iphone'; sleep 1
 xdotool key Return; sleep 3
 import -window $IPH $OUT/05-iphone-sent.png
 
-xdotool windowactivate --sync $RAY; sleep 2
+focus_win $RAY || exit 1
 import -window $RAY $OUT/06-ray-final.png
 
 # --- zoom test ---
-xdotool key --clearmodifiers ctrl+plus; sleep 0.4
-xdotool key --clearmodifiers ctrl+plus; sleep 1.5
+focus_win $RAY || exit 1
+xdotool key --clearmodifiers --window $RAY ctrl+plus; sleep 0.6
+xdotool key --clearmodifiers --window $RAY ctrl+plus; sleep 1.5
 import -window $RAY $OUT/07-ray-zoom.png
 
 # --- tema dark ---

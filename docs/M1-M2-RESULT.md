@@ -50,8 +50,9 @@ dengan nama pengirim di atas bubble untuk grup.
 | Kirim pesan via Enter | ✅ masuk DB, ack diterima, ✓✓ muncul |
 | Balas dari instance lain | ✅ sampai ke window pertama dan tampil sebagai bubble masuk |
 | Klik gear → modal Pengaturan | ✅ modal terbuka (Light/Dark, warna bubble, radius, zoom) |
-| `Ctrl + +` 4× | ✅ `settings.scale = 1.4`, teks chat membesar (110%–140% bertahap) |
-| `Ctrl + 0` | ✅ kembali ke 100% |
+| `Ctrl + +` 3× | ✅ `settings.scale` = 1.0 → **1.3**, toast "Zoom chat 130%" |
+| `Ctrl + scroll` down 2× | ✅ 1.3 → **1.1** |
+| `Ctrl + 0` | ✅ kembali ke **1.0** |
 | Window resize 760×480 dan 1180×720 | ✅ layout ikut menyesuaikan, min-width 720 dipatuhi |
 | Tema dark | ✅ warna & kontras terbaca, tidak ada elemen menutupi |
 | Badge unread | ✅ instance penerima menampilkan badge 1 sebelum thread dibuka, hilang setelah dibuka |
@@ -79,7 +80,17 @@ dengan nama pengirim di atas bubble untuk grup.
 - Sesi uji GUI di X11 rapuh: restart `xfwm4` menghilangkan window app, jadi uji klik
   dilakukan sebelum window manager di-restart.
 
-## 5. Tangkapan layar dari app nyata
+## 5. Build release
+
+```
+cargo build --release -p lanchat-desktop   → 16m 17s
+target/release/lanchat-desktop             → 5.6 MB
+```
+
+Binary release diuji ulang dengan skrip E2E yang sama (bukan cuma compile):
+`BIN=target/release/lanchat-desktop bash scripts/e2e-ui.sh` → chat dua arah + ✓✓ OK.
+
+## 6. Tangkapan layar dari app nyata
 
 Semua diambil dari window aplikasi asli (WebKitGTK, display :11), bukan mockup:
 
