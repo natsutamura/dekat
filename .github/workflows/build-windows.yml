@@ -38,7 +38,7 @@ jobs:
       # punya AppUserModelID untuk aplikasi ini, dan notifikasi toast tidak muncul.
       - name: Build installer
         working-directory: apps/desktop
-        run: tauri build --bundles msi,nsis --verbose
+        run: tauri build --bundles "msi,nsis" --verbose
 
       - name: Kumpulkan artefak
         shell: pwsh
