@@ -24,10 +24,10 @@ keduanya cuma konsumen event.
 | **M0** ✅ | proto, identity, discovery multicast+fallback, TCP transport, chat teks broadcast & DM, ack | CLI dua mesin saling chat (sudah diuji) |
 | **M1** ✅ | **selesai**: SQLite riwayat, presence online/idle/dnd, typing, read receipt, unread count, model room/group, **TLS 1.3 + autentikasi Ed25519 terikat sesi (anti-relay)**, penolakan peer plaintext. **belum**: TOFU pinning antar sesi, reconnect backoff | core stabil |
 | **M2** 🟡 | **selesai**: sidebar + thread, bubble, dark/light, chat bar (emoji berkategori/send), avatar inisial + status dot, clear chat, mark read/unread, toast + **notifikasi OS native + taskbar flash**, zoom (Ctrl +/-/0/scroll), window resize, custom bubble, centang abu/biru. **belum**: foto profil/grup (upload gambar) | app desktop bisa dipakai harian |
-| **M3** 🟡 | **selesai**: kirim file chunked (128 KiB) + sha256 + progress + tolak chunk rusak/tidak berurutan + drag & drop + CLI `/file` + **gambar tampil inline & lightbox**. **belum**: resume kalau putus, kirim file di grup, paste gambar dari clipboard | kirim file antar perangkat |
+| **M3** 🟡 | **selesai**: kirim file chunked (128 KiB) + sha256 + progress + tolak chunk rusak + drag & drop + CLI `/file` + gambar inline & lightbox + **paste gambar (Ctrl+V, baca clipboard OS)**. **belum**: resume kalau putus, kirim file di grup | kirim file antar perangkat |
 | **M4** | Android: build Tauri mobile, `MulticastLock`, izin `NEARBY_WIFI_DEVICES` (API 33+), notifikasi lokal, foreground service | HP Android chat di LAN yang sama |
 | **M5** 🟡 | **selesai**: WebRTC audio 1:1, signalling via TCP, popup panggilan masuk, mute, timer, tanpa STUN/TURN, **panggilan grup (mesh penuh, roster di CallOffer, aturan dial id>self)**. **belum**: video, device picker, indikator speaking | panggilan suara antar perangkat |
-| **M6** 🟡 | **selesai**: installer Windows **MSI + NSIS** (AUMID → notifikasi jalan). **belum**: pairing QR, pengaturan nama/foto, AppImage/deb, updater, code signing | rilis v1.0 |
+| **M6** 🟡 | **selesai**: installer Windows **MSI + NSIS** (AUMID → notifikasi jalan), **Linux AppImage + deb + tar.gz + PKGBUILD Arch**. **belum**: pairing QR, pengaturan nama/foto, updater, code signing | rilis v1.0 |
 
 ## Pemetaan fitur yang diminta
 
