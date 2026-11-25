@@ -1,0 +1,201 @@
+//! lanchat CLI — harness M0 buat nguji core tanpa UI.
+//!
+//! Pemakaian:
+//!   lanchat --name ray --port 41235 --seed 10.10.1.28:41236
+//!
+//! Perintah di dalam sesi:
+//!   <teks>            kirim ke semua peer (broadcast)
+//!   /dm <id|nama> <teks>
+//!   /peers            daftar peer
+//!   /ping             info node
+//!   /quit
+
+use anyhow::Result;
+use lanchat_core::{proto::fmt_hms, Config, Event, Node, BROADCAST};
+use std::{
+    net::SocketAddr,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
+use tokio::io::{AsyncBufReadExt, BufReader};
+
+fn parse_args() -> Result<Config> {
+    let mut name = std::env::var("USER").unwrap_or_else(|_| "user".into());
+    let mut port: u16 = lanchat_core::proto::DEFAULT_APP_PORT;
+    let mut data_dir = dirs_or_home().join(".lanchat");
+    let mut seeds: Vec<SocketAddr> = Vec::new();
+
+    let mut it = std::env::args().skip(1);
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--name" | "-n" => name = it.next().unwrap_or_default(),
+            "--port" | "-p" => port = it.next().unwrap_or_default().parse()?,
+            "--dir" => data_dir = PathBuf::from(it.next().unwrap_or_default()),
+            "--seed" | "--peer" => {
+                let v = it.next().unwrap_or_default();
+                seeds.push(v.parse()?);
+            }
+            "--help" | "-h" => {
+                println!(
+                    "lanchat M0\n  --name <nama>\n  --port <port tcp>\n  --dir <data dir>\n  --seed <ip:port> (boleh berkali-kali)"
+                );
+                std::process::exit(0);
+            }
+            other => anyhow::bail!("argumen tidak dikenal: {other}"),
+        }
+    }
+
+    Ok(Config {
+        name,
+        port,
+        data_dir,
+        seeds,
+    })
+}
+
+fn dirs_or_home() -> PathBuf {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn now_hms() -> String {
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    fmt_hms(ms)
+}
+
+fn print_event(e: Event) {
+    match e {
+        Event::PeerUp(p) => println!(
+            "  + {} [{}] {}  {}:{}",
+            p.name,
+            p.os,
+            &p.id[..6],
+            p.addr.ip(),
+            p.addr.port()
+        ),
+        Event::PeerDown(id) => println!("  - {} keluar", &id[..6.min(id.len())]),
+        Event::Text {
+            from,
+            from_name,
+            to,
+            body,
+            ts,
+            mine,
+        } => {
+            if mine {
+                let dest = if to == BROADCAST {
+                    "semua".to_string()
+                } else {
+                    to[..6.min(to.len())].to_string()
+                };
+                println!("[{}] aku → {}: {}", fmt_hms(ts), dest, body);
+            } else {
+                let _ = from;
+                println!("[{}] {}: {}", fmt_hms(ts), from_name, body);
+            }
+        }
+        Event::Ack { id, ts } => println!("[{}] ✓ terkirim ({})", fmt_hms(ts), &id[..8]),
+        Event::Warn(w) => println!("! {w}"),
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "warn".into()),
+        )
+        .with_target(false)
+        .init();
+
+    let cfg = parse_args()?;
+    let node = Node::start(cfg).await?;
+
+    println!("lanchat M0 — {} [{}]", node.name(), node.id());
+    println!("listening TCP :{}", node.port());
+    println!("perintah: <teks> = broadcast, /dm <id> <teks>, /peers, /quit\n");
+
+    let mut ev = node.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match ev.recv().await {
+                Ok(e) => print_event(e),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    println!("! {n} event terlewat")
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    while let Some(line) = lines.next_line().await? {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line == "/quit" || line == "/exit" {
+            break;
+        }
+        if line == "/peers" {
+            let peers = node.peers();
+            if peers.is_empty() {
+                println!("  (belum ada peer)");
+            }
+            for p in peers {
+                println!(
+                    "  {:<12} {:<8} {:<6} {}  {}",
+                    p.name,
+                    p.os,
+                    &p.id[..6],
+                    p.addr,
+                    if node.is_connected(&p.id) {
+                        "connected"
+                    } else {
+                        "-"
+                    }
+                );
+            }
+            continue;
+        }
+        if line == "/ping" {
+            println!(
+                "  {} [{}] tcp:{} peers:{}",
+                node.name(),
+                node.id(),
+                node.port(),
+                node.peers().len()
+            );
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("/dm ") {
+            let mut parts = rest.splitn(2, ' ');
+            let who = parts.next().unwrap_or_default();
+            let body = parts.next().unwrap_or_default().trim();
+            if who.is_empty() || body.is_empty() {
+                println!("  pakai: /dm <id|nama> <teks>");
+                continue;
+            }
+            match node.find_peer(who) {
+                Some(p) => {
+                    if let Err(e) = node.send_text(&p.id, body) {
+                        println!("  gagal: {e}");
+                    }
+                }
+                None => println!("  peer '{who}' tidak ketemu"),
+            }
+            continue;
+        }
+        if let Err(e) = node.send_text(BROADCAST, line) {
+            println!("  gagal: {e}");
+        }
+    }
+
+    println!("\n{} keluar. {}", now_hms(), "bye 👋");
+    Ok(())
+}
