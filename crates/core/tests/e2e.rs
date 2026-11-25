@@ -216,3 +216,105 @@ async fn kirim_file_tanpa_koneksi_gagal_dengan_jelas() {
     assert!(err.to_string().contains("koneksi"), "pesan error: {err}");
     let _ = std::fs::remove_file(&src);
 }
+
+#[tokio::test]
+async fn signalling_call_offer_answer_ice_end() {
+    let (a, b) = pair().await;
+    let (a_id, b_id) = (a.id().to_string(), b.id().to_string());
+    let mut ev_b = b.subscribe();
+    let mut ev_a = a.subscribe();
+    let call_id = "call-1";
+
+    // A menawarkan panggilan
+    a.call_offer(&b_id, call_id, "v=0\r\noffer").unwrap();
+    let (incoming_call, incoming_from, sdp) = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::CallIncoming { call_id, from, sdp, .. }) = ev_b.recv().await {
+                return (call_id, from, sdp);
+            }
+        }
+    })
+    .await
+    .expect("B tidak menerima CallIncoming");
+    assert_eq!(incoming_call, call_id);
+    assert_eq!(incoming_from, a_id);
+    assert_eq!(sdp, "v=0\r\noffer");
+
+    // B menjawab
+    b.call_answer(&a_id, call_id, true, "v=0\r\nanswer", "").unwrap();
+    let (ok_sdp) = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::CallAccepted { sdp, .. }) = ev_a.recv().await {
+                return sdp;
+            }
+        }
+    })
+    .await
+    .expect("A tidak menerima CallAccepted");
+    assert_eq!(ok_sdp, "v=0\r\nanswer");
+
+    // ICE dari B ke A
+    b.call_ice(&a_id, call_id, "candidate:1 1 UDP 1 10.0.0.2 5000 typ host", "0", 0)
+        .unwrap();
+    let cand = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::CallIce { candidate, .. }) = ev_a.recv().await {
+                return candidate;
+            }
+        }
+    })
+    .await
+    .expect("A tidak menerima CallIce");
+    assert!(cand.contains("candidate:1"));
+
+    // A menutup panggilan
+    a.call_end(&b_id, call_id, "selesai").unwrap();
+    let reason = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::CallEnded { reason, .. }) = ev_b.recv().await {
+                return reason;
+            }
+        }
+    })
+    .await
+    .expect("B tidak menerima CallEnded");
+    assert_eq!(reason, "selesai");
+}
+
+#[tokio::test]
+async fn call_ditolak_menghasilkan_event_rejected() {
+    let (a, b) = pair().await;
+    let (a_id, b_id) = (a.id().to_string(), b.id().to_string());
+    let mut ev_a = a.subscribe();
+    let mut ev_b = b.subscribe();
+
+    a.call_offer(&b_id, "c2", "offer").unwrap();
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::CallIncoming { .. }) = ev_b.recv().await {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("offer tidak sampai");
+
+    b.call_answer(&a_id, "c2", false, "", "sedang sibuk").unwrap();
+    let reason = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::CallRejected { reason, .. }) = ev_a.recv().await {
+                return reason;
+            }
+        }
+    })
+    .await
+    .expect("tidak ada CallRejected");
+    assert_eq!(reason, "sedang sibuk");
+}
+
+#[tokio::test]
+async fn call_tanpa_koneksi_gagal_dengan_jelas() {
+    let (a, _b) = pair().await;
+    let err = a.call_offer("peer-hilang", "c3", "offer").unwrap_err();
+    assert!(err.to_string().contains("koneksi"), "error: {err}");
+}

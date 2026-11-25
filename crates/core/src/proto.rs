@@ -156,6 +156,44 @@ pub enum Frame {
         #[serde(default)]
         reason: String,
     },
+    /// Ajakan voice call. `call_id` dipakai untuk semua frame call berikutnya.
+    CallOffer {
+        call_id: String,
+        from: String,
+        from_name: String,
+        to: String,
+        /// SDP offer WebRTC (audio saja)
+        sdp: String,
+        ts: u64,
+    },
+    /// Jawaban atas [`Frame::CallOffer`]. `accept=false` → panggilan ditolak.
+    CallAnswer {
+        call_id: String,
+        from: String,
+        accept: bool,
+        /// SDP answer; kosong kalau ditolak
+        #[serde(default)]
+        sdp: String,
+        #[serde(default)]
+        reason: String,
+    },
+    /// Kandidat ICE (trickle). Dikirim setelah offer/answer.
+    CallIce {
+        call_id: String,
+        from: String,
+        candidate: String,
+        #[serde(default)]
+        sdp_mid: String,
+        #[serde(default)]
+        sdp_mline_index: u32,
+    },
+    /// Panggilan diakhiri (salah satu sisi menutup).
+    CallEnd {
+        call_id: String,
+        from: String,
+        #[serde(default)]
+        reason: String,
+    },
 }
 
 pub fn now_ms() -> u64 {

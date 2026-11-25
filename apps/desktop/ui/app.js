@@ -731,7 +731,14 @@ async function boot() {
       toast("Gagal kirim file", String(err));
     }
   };
-  $("btn-call").onclick = () => toast("Voice call", "Masuk M5 — signalling-nya sudah disiapkan");
+  $("btn-call").onclick = () => {
+    const t = S.threads.find((x) => x.id === S.active);
+    if (!t) return toast("Pilih chat dulu", "Panggilan hanya untuk chat pribadi");
+    if (t.kind !== "dm") return toast("Belum bisa", "Panggilan grup masuk M5-lanjut");
+    const p = S.peers.find((x) => x.id === t.id);
+    if (p && !p.online) return toast("Peer offline", "Tidak bisa memanggil peer yang tidak online");
+    window.LanChatCall.startCall(t.id, t.name);
+  };
   $("btn-info").onclick = () => {
     const t = S.threads.find((x) => x.id === S.active);
     if (!t) return;
@@ -799,6 +806,9 @@ async function boot() {
 
   document.title = baseTitle();
   window.addEventListener("focus", () => { document.title = baseTitle(); });
+
+  // voice call
+  if (window.LanChatCall) await window.LanChatCall.init();
 
   // buka thread terakhir kalau ada
   if (S.threads.length) openThread(S.threads[0].id);

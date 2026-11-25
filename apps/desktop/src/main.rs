@@ -405,6 +405,66 @@ async fn send_file_path(
     Ok(msg_id)
 }
 
+// ---------- voice call: signalling ----------
+// Audio-nya sendiri jalan di webview (WebRTC). Rust cuma meneruskan SDP/ICE
+// lewat koneksi TCP yang sudah dipakai chat.
+
+#[tauri::command]
+#[allow(non_snake_case)]
+fn call_offer(state: State<AppState>, peerId: String, callId: String, sdp: String) -> Result<(), String> {
+    state
+        .node
+        .call_offer(&peerId, &callId, &sdp)
+        .map_err(e2s)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+fn call_answer(
+    state: State<AppState>,
+    peerId: String,
+    callId: String,
+    accept: bool,
+    sdp: String,
+    reason: Option<String>,
+) -> Result<(), String> {
+    state
+        .node
+        .call_answer(&peerId, &callId, accept, &sdp, reason.as_deref().unwrap_or(""))
+        .map_err(e2s)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+fn call_ice(
+    state: State<AppState>,
+    peerId: String,
+    callId: String,
+    candidate: String,
+    sdpMid: Option<String>,
+    sdpMlineIndex: Option<u32>,
+) -> Result<(), String> {
+    state
+        .node
+        .call_ice(
+            &peerId,
+            &callId,
+            &candidate,
+            sdpMid.as_deref().unwrap_or("0"),
+            sdpMlineIndex.unwrap_or(0),
+        )
+        .map_err(e2s)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+fn call_end(state: State<AppState>, peerId: String, callId: String, reason: Option<String>) -> Result<(), String> {
+    state
+        .node
+        .call_end(&peerId, &callId, reason.as_deref().unwrap_or("ditutup"))
+        .map_err(e2s)
+}
+
 /// Buka file hasil terimaan pakai aplikasi default OS.
 #[tauri::command]
 fn open_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
@@ -641,6 +701,58 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
                 serde_json::json!({ "id": id, "name": name, "reason": reason }),
             );
         }
+        Event::CallIncoming {
+            call_id,
+            from,
+            from_name,
+            sdp,
+        } => {
+            let _ = app.emit(
+                "lc://call-incoming",
+                serde_json::json!({ "callId": call_id, "from": from, "fromName": from_name, "sdp": sdp }),
+            );
+        }
+        Event::CallAccepted { call_id, from, sdp } => {
+            let _ = app.emit(
+                "lc://call-accepted",
+                serde_json::json!({ "callId": call_id, "from": from, "sdp": sdp }),
+            );
+        }
+        Event::CallRejected {
+            call_id,
+            from,
+            reason,
+        } => {
+            let _ = app.emit(
+                "lc://call-rejected",
+                serde_json::json!({ "callId": call_id, "from": from, "reason": reason }),
+            );
+        }
+        Event::CallIce {
+            call_id,
+            from,
+            candidate,
+            sdp_mid,
+            sdp_mline_index,
+        } => {
+            let _ = app.emit(
+                "lc://call-ice",
+                serde_json::json!({
+                    "callId": call_id, "from": from, "candidate": candidate,
+                    "sdpMid": sdp_mid, "sdpMlineIndex": sdp_mline_index
+                }),
+            );
+        }
+        Event::CallEnded {
+            call_id,
+            from,
+            reason,
+        } => {
+            let _ = app.emit(
+                "lc://call-ended",
+                serde_json::json!({ "callId": call_id, "from": from, "reason": reason }),
+            );
+        }
         Event::Warn(w) => {
             let _ = app.emit("lc://warn", serde_json::json!({ "message": w }));
         }
@@ -725,7 +837,11 @@ fn main() {
             peers,
             send_file,
             send_file_path,
-            open_path
+            open_path,
+            call_offer,
+            call_answer,
+            call_ice,
+            call_end
         ])
         .run(tauri::generate_context!())
         .expect("gagal menjalankan app");

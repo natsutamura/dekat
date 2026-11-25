@@ -139,6 +139,19 @@ fn print_event(e: Event) {
             println!("  ✓ file diterima: {} → {}", name, path)
         }
         Event::FileFailed { name, reason, .. } => println!("  ✗ transfer gagal {}: {}", name, reason),
+        Event::CallIncoming {
+            call_id,
+            from_name,
+            ..
+        } => println!("  ☎ PANGGILAN MASUK dari {from_name} (id {call_id}) — jawab dengan /answer <nama> {call_id} accept"),
+        Event::CallAccepted { call_id, .. } => println!("  ☎ panggilan {call_id} diterima"),
+        Event::CallRejected { call_id, reason, .. } => {
+            println!("  ☎ panggilan {call_id} ditolak: {reason}")
+        }
+        Event::CallIce { .. } => println!("  ☎ ICE diterima"),
+        Event::CallEnded { call_id, reason, .. } => {
+            println!("  ☎ panggilan {call_id} berakhir: {reason}")
+        }
         Event::FileOffer { .. } => {}
         Event::Warn(w) => println!("! {w}"),
     }
@@ -161,11 +174,21 @@ async fn main() -> Result<()> {
     println!("listening TCP :{}", node.port());
     println!("perintah: <teks> = broadcast, /dm <id> <teks>, /peers, /quit\n");
 
+    // call_id terakhir yang masuk, biar `/answer <peer> auto accept` bisa dipakai
+    let last_call: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let last_call_ev = last_call.clone();
+
     let mut ev = node.subscribe();
     tokio::spawn(async move {
         loop {
             match ev.recv().await {
-                Ok(e) => print_event(e),
+                Ok(e) => {
+                    if let Event::CallIncoming { call_id, .. } = &e {
+                        *last_call_ev.lock().unwrap() = Some(call_id.clone());
+                    }
+                    print_event(e)
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     println!("! {n} event terlewat")
                 }
@@ -226,6 +249,68 @@ async fn main() -> Result<()> {
                     });
                 }
                 None => println!("  peer '{who}' tidak ketemu"),
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("/call ") {
+            let who = rest.trim();
+            match node.find_peer(who) {
+                Some(p) => {
+                    let call_id = format!("c-{}", &lanchat_core::proto::new_msg_id()[..8]);
+                    // simpan juga di sisi pemanggil, supaya /hangup auto bisa dipakai
+                    *last_call.lock().unwrap() = Some(call_id.clone());
+                    match node.call_offer(&p.id, &call_id, "dummy-offer-sdp") {
+                        Ok(()) => println!("  ☎ memanggil {} ({})", p.name, call_id),
+                        Err(e) => println!("  gagal: {e}"),
+                    }
+                }
+                None => println!("  peer '{who}' tidak ketemu"),
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("/answer ") {
+            let mut it = rest.splitn(3, ' ');
+            let who = it.next().unwrap_or_default();
+            let call_id = it.next().unwrap_or_default();
+            let verdict = it.next().unwrap_or("accept").trim();
+            let call_id = if call_id == "auto" {
+                last_call.lock().unwrap().clone().unwrap_or_default()
+            } else {
+                call_id.to_string()
+            };
+            let call_id = call_id.as_str();
+            if call_id.is_empty() {
+                println!("  belum ada panggilan masuk");
+                continue;
+            }
+            if let Some(p) = node.find_peer(who) {
+                let accept = verdict != "reject";
+                match node.call_answer(&p.id, call_id, accept, "dummy-answer-sdp", verdict) {
+                    Ok(()) => println!("  ☎ jawab {} : {}", call_id, verdict),
+                    Err(e) => println!("  gagal: {e}"),
+                }
+            } else {
+                println!("  peer '{who}' tidak ketemu");
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("/hangup ") {
+            let mut it = rest.splitn(2, ' ');
+            let who = it.next().unwrap_or_default();
+            let call_id = it.next().unwrap_or_default();
+            let call_id = if call_id == "auto" {
+                last_call.lock().unwrap().clone().unwrap_or_default()
+            } else {
+                call_id.to_string()
+            };
+            let call_id = call_id.as_str();
+            if call_id.is_empty() {
+                println!("  belum ada panggilan");
+                continue;
+            }
+            if let Some(p) = node.find_peer(who) {
+                let _ = node.call_end(&p.id, call_id, "ditutup dari CLI");
+                println!("  ☎ tutup {call_id}");
             }
             continue;
         }

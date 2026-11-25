@@ -65,6 +65,11 @@
     },
     messages: (a) => byThread[a.threadId] || [],
     peers: () => peers,
+    call_offer: () => null,
+    call_answer: () => null,
+    call_ice: () => null,
+    call_end: () => null,
+    open_path: () => null,
   };
 
   window.__TAURI__ = {

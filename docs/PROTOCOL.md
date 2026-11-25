@@ -1,4 +1,4 @@
-# Protokol LAN Chat v3 (M1 + M3)
+# Protokol LAN Chat v4 (M1 + M3 + M5)
 
 Tanpa server. Semua node setara (peer-to-peer). Angka port ada di `crates/core/src/proto.rs`.
 
@@ -45,6 +45,10 @@ Handshake: **kedua sisi mengirim `hello` segera setelah koneksi terbuka**, lalu 
 {"t":"file_accept","id":"f1","accept":true,"reason":""}
 {"t":"file_chunk","id":"f1","idx":0,"data":"<base64 128 KiB>"}
 {"t":"file_done","id":"f1","ok":true,"reason":""}
+{"t":"call_offer","call_id":"c-9f2a","from":"...","from_name":"ray","to":"<peer>","sdp":"v=0...","ts":1795...}
+{"t":"call_answer","call_id":"c-9f2a","from":"...","accept":true,"sdp":"v=0...","reason":""}
+{"t":"call_ice","call_id":"c-9f2a","from":"...","candidate":"candidate:1 1 UDP ...","sdp_mid":"0","sdp_mline_index":0}
+{"t":"call_end","call_id":"c-9f2a","from":"...","reason":"ditutup"}
 ```
 
 - `to` = `"*"` → semua koneksi; `#xxxxxxxx` → room/grup; atau node id peer
@@ -97,7 +101,32 @@ Alur:
 Batas M3: satu file per pesan, penerima harus online, tidak ada resume kalau putus,
 kirim file hanya untuk DM (grup belum).
 
-## 6. Batas M1
+## 6. Voice call (M5)
+
+WebRTC audio 1:1, **peer-to-peer langsung**, tanpa server STUN/TURN — di subnet yang sama,
+host candidate sudah cukup. Rust hanya jadi pipa signalling; audio tidak pernah lewat Rust.
+
+Alur:
+
+1. Penelepon: `getUserMedia({audio})` → `RTCPeerConnection` → `createOffer` →
+   tunggu ICE gathering selesai (timeout 1,5 s) → kirim `call_offer` berisi SDP.
+2. Penerima: dapat `call_offer` → popup → kalau diterima: `setRemoteDescription(offer)` →
+   `createAnswer` → kirim `call_answer` berisi SDP.
+3. Kedua sisi mengirim `call_ice` untuk kandidat tambahan (trickle). Kandidat yang tiba
+   sebelum remote description disimpan di antrean dan di-flush setelahnya.
+4. `ontrack` → audio diputar lewat `<audio>` tersembunyi; timer mulai.
+5. Salah satu sisi menekan tombol tutup → `call_end` → kedua sisi menutup RTCPeerConnection
+   dan mematikan track mikrofon.
+
+Detail penting:
+- `call_id` dibuat acak (`c-` + 8 hex) per panggilan, dipakai untuk semua frame panggilan itu
+- `iceServers: []` disengaja: tidak ada STUN publik, karena LAN-only dan tidak butuh internet
+- `echoCancellation`, `noiseSuppression`, `autoGainControl` aktif
+- Penerima yang sedang dalam panggilan lain otomatis menolak dengan alasan
+  "sedang dalam panggilan lain"
+- Batas M5: audio saja, 1:1, tanpa rekaman, tanpa device picker (pakai default OS)
+
+## 7. Batas M1
 
 Belum ada: TLS, signature per frame, file transfer, store-and-forward untuk anggota grup
 yang offline, dan call. Riwayat sudah persisten di SQLite lokal per perangkat.

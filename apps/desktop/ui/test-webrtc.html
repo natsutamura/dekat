@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>LAN Chat — uji WebRTC</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  body{overflow:auto;padding:16px;background:#0f1115;color:#eee}
+  .wrap{display:flex;gap:16px}
+  .pane{flex:1;background:#1e1e1e;border-radius:10px;padding:12px}
+  h3{font-size:13px;margin-bottom:8px;color:#9aa}
+  pre{font-size:11px;white-space:pre-wrap;max-height:200px;overflow:auto;background:#111;padding:8px;border-radius:6px}
+  .app{height:420px;position:relative;border-radius:8px;overflow:hidden}
+  #log div{margin:2px 0}
+  .ok{color:#34c759}.bad{color:#ff453a}
+</style>
+</head>
+<body>
+<!--
+  Halaman uji: dua tab (dua "peer") melakukan handshake WebRTC sungguhan
+  lewat jalur signalling yang sama dengan call.js. Audio memakai osilator
+  sintetis karena mesin uji tidak punya mikrofon.
+-->
+<div class="wrap">
+  <div class="pane">
+    <h3>peer: <span id="who">?</span></h3>
+    <div class="app"><div class="app" id="app" data-theme="light">
+      <aside class="sidebar"><div class="me-card"><div class="avatar me">R</div>
+        <div class="me-meta"><div class="me-name" id="me-name">?</div>
+        <button class="status-btn"><span class="sq"></span>Online</button></div></div></aside>
+      <section class="panel"><header class="panel-head"><div class="avatar sm">?</div>
+        <div class="head-meta"><div class="head-name">panggilan</div></div></header>
+        <div class="messages" id="messages"></div></section>
+    </div></div>
+    <pre id="log"></pre>
+  </div>
+</div>
+
+<script>
+/* ---------- mock Tauri: relay ke tab lain lewat BroadcastChannel ---------- */
+(() => {
+  const me = new URLSearchParams(location.search).get("me") || "a";
+  const other = me === "a" ? "b" : "a";
+  const ch = new BroadcastChannel("lanchat-call-test");
+  const listeners = {};
+  window.__PEER = me;
+  window.__OTHER = other;
+
+  const emit = (ev, payload) => (listeners[ev] || []).forEach((cb) => cb({ payload }));
+
+  ch.onmessage = (e) => {
+    const m = e.data;
+    if (!m || m.to !== me) return;
+    emit(m.event, m.payload);
+  };
+
+  const relay = (event, payload) => ch.postMessage({ to: other, event, payload });
+
+  window.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args = {}) => {
+        log(`invoke ${cmd}`);
+        if (cmd === "call_offer")
+          relay("lc://call-incoming", {
+            callId: args.callId, from: me, fromName: "peer-" + me, sdp: args.sdp,
+          });
+        else if (cmd === "call_answer")
+          relay(args.accept ? "lc://call-accepted" : "lc://call-rejected", {
+            callId: args.callId, from: me, sdp: args.sdp || "", reason: args.reason || "",
+          });
+        else if (cmd === "call_ice")
+          relay("lc://call-ice", {
+            callId: args.callId, from: me, candidate: args.candidate,
+            sdpMid: args.sdpMid, sdpMlineIndex: args.sdpMlineIndex,
+          });
+        else if (cmd === "call_end")
+          relay("lc://call-ended", { callId: args.callId, from: me, reason: args.reason || "" });
+        return null;
+      },
+    },
+    event: {
+      listen: async (ev, cb) => {
+        (listeners[ev] = listeners[ev] || []).push(cb);
+        return () => {};
+      },
+    },
+  };
+
+  // audio sintetis: osilator → MediaStreamDestination (pengganti mikrofon)
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  window.__ac = ctx;
+  // headless: AudioContext mulai "suspended" -> osilator tidak menghasilkan sampel.
+  // Klik di mana pun me-resume (butuh user activation).
+  document.addEventListener("click", () => ctx.resume(), { once: false });
+  addEventListener("load", () => ctx.resume().catch(() => {}));
+  navigator.mediaDevices = navigator.mediaDevices || {};
+  navigator.mediaDevices.getUserMedia = async () => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const dst = ctx.createMediaStreamDestination();
+    osc.frequency.value = me === "a" ? 440 : 660;
+    gain.gain.value = 0.2;
+    await ctx.resume().catch(() => {});
+    log("ctx state: " + ctx.state);
+    osc.connect(gain).connect(dst);
+    osc.start();
+    return dst.stream;
+  };
+})();
+
+function log(msg, cls) {
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.textContent = msg;
+  document.getElementById("log").appendChild(d);
+}
+</script>
+<script src="call.js"></script>
+<script>
+(async () => {
+  document.getElementById("who").textContent = window.__PEER;
+  document.getElementById("me-name").textContent = "peer-" + window.__PEER;
+
+  // PENTING: pasang wrapper SEBELUM init(), karena call.js mendaftarkan
+  // listener-nya saat init(). Kalau dipasang sesudah, panggilan masuk tidak
+  // pernah ditangani dan penelepon menggantung di state "offering".
+  if (window.__PEER === "b") {
+    const origListen = window.__TAURI__.event.listen;
+    window.__TAURI__.event.listen = async (ev, cb) => {
+      if (ev === "lc://call-incoming") {
+        const wrapped = async (e) => {
+          await cb(e);
+          setTimeout(() => window.LanChatCall.acceptCall(), 250);
+        };
+        return origListen(ev, wrapped);
+      }
+      return origListen(ev, cb);
+    };
+  }
+
+  await window.LanChatCall.init();
+  window.__READY = true;
+  log("ready sebagai peer " + window.__PEER);
+})();
+</script>
+</body>
+</html>

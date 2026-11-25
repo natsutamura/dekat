@@ -3,7 +3,7 @@
 Chat P2P di jaringan lokal (tanpa server, tanpa internet) untuk **Windows, Linux, Android**.
 Tampilan mengikuti iMessage: bubble chat, tema dark/light, status online/idle/DND.
 
-Status: **M0–M3 selesai & teruji** — app desktop Tauri v2 (6,7 MB release), chat dua arah,
+Status: **M0–M3 + voice call selesai & teruji** — app desktop Tauri v2 (6,7 MB release), chat dua arah,
 grup, kirim file dengan verifikasi sha256. Bukti di `docs/M1-M2-RESULT.md` dan `docs/M3-RESULT.md`.
 
 ## Jalanin app desktop
@@ -56,7 +56,8 @@ Kalau jaringan memblok multicast, tambahkan seed manual: `--seed 10.10.1.28:4123
 | Emoji picker | ✅ |
 | Notifikasi in-app (toast) | ✅ |
 | Kirim file (DM, chunked + sha256) | ✅ tombol lampiran / drag & drop |
-| Voice / video call | ⬜ M5 |
+| Voice call 1:1 (WebRTC) | ✅ mute, timer, popup panggilan masuk |
+| Video call / group call | ⬜ M5-lanjut |
 | Android | ⬜ M4 |
 
 ## Struktur
@@ -83,6 +84,7 @@ bash scripts/e2e-file.sh         # transfer file via CLI + verifikasi sha256
 bash scripts/e2e-file-ui.sh      # transfer file via dialog GUI asli + sha256
 bash scripts/check-zoom.sh       # zoom lewat keyboard, dibuktikan dari SQLite
 bash scripts/check-dark.sh       # tema dark persisten antar restart
+bash scripts/e2e-call.sh         # signalling call: offer → answer → ice → end
 ```
 
 ## Keamanan (status jujur)

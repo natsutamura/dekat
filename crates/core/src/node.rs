@@ -128,6 +128,37 @@ pub enum Event {
         name: String,
         reason: String,
     },
+    /// Ada panggilan masuk (belum dijawab).
+    CallIncoming {
+        call_id: String,
+        from: String,
+        from_name: String,
+        sdp: String,
+    },
+    /// Peer menerima ajakan kita, bawa SDP answer.
+    CallAccepted {
+        call_id: String,
+        from: String,
+        sdp: String,
+    },
+    CallRejected {
+        call_id: String,
+        from: String,
+        reason: String,
+    },
+    /// Kandidat ICE dari peer.
+    CallIce {
+        call_id: String,
+        from: String,
+        candidate: String,
+        sdp_mid: String,
+        sdp_mline_index: u32,
+    },
+    CallEnded {
+        call_id: String,
+        from: String,
+        reason: String,
+    },
     Warn(String),
 }
 
@@ -476,6 +507,82 @@ impl Node {
             bail!("{reason}");
         }
         Ok(msg_id)
+    }
+
+    /// Kirim ajakan voice call (SDP offer) ke satu peer.
+    pub fn call_offer(&self, to: &str, call_id: &str, sdp: &str) -> Result<()> {
+        self.send_to(
+            to,
+            Frame::CallOffer {
+                call_id: call_id.to_string(),
+                from: self.0.id.clone(),
+                from_name: self.0.name.clone(),
+                to: to.to_string(),
+                sdp: sdp.to_string(),
+                ts: now_ms(),
+            },
+        )
+    }
+
+    /// Jawab ajakan: `accept=false` → tolak.
+    pub fn call_answer(&self, to: &str, call_id: &str, accept: bool, sdp: &str, reason: &str) -> Result<()> {
+        self.send_to(
+            to,
+            Frame::CallAnswer {
+                call_id: call_id.to_string(),
+                from: self.0.id.clone(),
+                accept,
+                sdp: sdp.to_string(),
+                reason: reason.to_string(),
+            },
+        )
+    }
+
+    /// Kirim kandidat ICE.
+    pub fn call_ice(
+        &self,
+        to: &str,
+        call_id: &str,
+        candidate: &str,
+        sdp_mid: &str,
+        sdp_mline_index: u32,
+    ) -> Result<()> {
+        self.send_to(
+            to,
+            Frame::CallIce {
+                call_id: call_id.to_string(),
+                from: self.0.id.clone(),
+                candidate: candidate.to_string(),
+                sdp_mid: sdp_mid.to_string(),
+                sdp_mline_index,
+            },
+        )
+    }
+
+    /// Tutup panggilan.
+    pub fn call_end(&self, to: &str, call_id: &str, reason: &str) -> Result<()> {
+        self.send_to(
+            to,
+            Frame::CallEnd {
+                call_id: call_id.to_string(),
+                from: self.0.id.clone(),
+                reason: reason.to_string(),
+            },
+        )
+    }
+
+    /// Kirim satu frame ke satu peer.
+    fn send_to(&self, to: &str, frame: Frame) -> Result<()> {
+        let tx = self
+            .0
+            .conns
+            .lock()
+            .unwrap()
+            .get(to)
+            .cloned()
+            .with_context(|| format!("tidak ada koneksi ke {to}"))?;
+        tx.try_send(frame)
+            .map_err(|_| anyhow::anyhow!("koneksi ke {to} sedang penuh"))
     }
 
     /// Kirim frame teks ke daftar target (peer id atau `*`).
@@ -965,6 +1072,67 @@ impl Node {
                 if let Some(tx) = self.0.pending_done.lock().unwrap().remove(&id) {
                     let _ = tx.send(ok);
                 }
+            }
+            Frame::CallOffer {
+                call_id,
+                from,
+                from_name,
+                sdp,
+                ..
+            } => {
+                self.emit(Event::CallIncoming {
+                    call_id,
+                    from,
+                    from_name,
+                    sdp,
+                });
+            }
+            Frame::CallAnswer {
+                call_id,
+                from,
+                accept,
+                sdp,
+                reason,
+            } => {
+                if accept {
+                    self.emit(Event::CallAccepted {
+                        call_id,
+                        from,
+                        sdp,
+                    });
+                } else {
+                    self.emit(Event::CallRejected {
+                        call_id,
+                        from,
+                        reason,
+                    });
+                }
+            }
+            Frame::CallIce {
+                call_id,
+                from,
+                candidate,
+                sdp_mid,
+                sdp_mline_index,
+            } => {
+                self.emit(Event::CallIce {
+                    call_id,
+                    from,
+                    candidate,
+                    sdp_mid,
+                    sdp_mline_index,
+                });
+            }
+            Frame::CallEnd {
+                call_id,
+                from,
+                reason,
+            } => {
+                self.emit(Event::CallEnded {
+                    call_id,
+                    from,
+                    reason,
+                });
             }
             Frame::Presence { id, status } => {
                 if let Some(p) = self.0.peers.lock().unwrap().get_mut(&id) {
