@@ -62,7 +62,7 @@ jobs:
           tar -C dist -czf "$PKG.tar.gz" "$(basename "$PKG")"
           rm -rf "$PKG"
 
-          [ -n "$APP" ] && cp "$APP" dist/LANChat-x86_64.AppImage"
+          [ -n "$APP" ] && cp "$APP" dist/LANChat-x86_64.AppImage
           [ -n "$DEB" ] && cp "$DEB" dist/
           cp README.md dist/README.md
           ls -l dist
