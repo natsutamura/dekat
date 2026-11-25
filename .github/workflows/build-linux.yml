@@ -1,0 +1,86 @@
+name: build-linux
+
+# Build Linux (x64) di runner Ubuntu asli: AppImage untuk distro apa pun,
+# plus tar.gz portabel yang dipakai PKGBUILD Arch.
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "apps/desktop/**"
+      - "crates/**"
+      - ".github/workflows/build-linux.yml"
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Dependensi sistem (WebKitGTK 4.1 + AppImage tooling)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libfuse2 file
+
+      - name: Setup Node + Tauri CLI
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install -g @tauri-apps/cli@^2
+
+      - name: Build (AppImage + deb)
+        working-directory: apps/desktop
+        run: tauri build --bundles "appimage,deb" --verbose
+
+      - name: Susun artefak
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          BIN=target/release/lanchat-desktop
+          test -x "$BIN"
+          APP=$(find target/release/bundle/appimage -name '*.AppImage' | head -1 || true)
+          DEB=$(find target/release/bundle/deb -name '*.deb' | head -1 || true)
+
+          # tar.gz portabel: binary + .desktop + ikon. Inilah yang dipakai PKGBUILD Arch.
+          VER=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          PKG=dist/lanchat-${VER}-linux-x64
+          mkdir -p "$PKG/usr/bin" "$PKG/usr/share/applications" "$PKG/usr/share/icons/hicolor/512x512/apps"
+          cp "$BIN" "$PKG/usr/bin/lanchat"
+          cp packaging/lanchat.desktop "$PKG/usr/share/applications/"
+          cp apps/desktop/icons/icon.png "$PKG/usr/share/icons/hicolor/512x512/apps/lanchat.png"
+          tar -C dist -czf "$PKG.tar.gz" "$(basename "$PKG")"
+          rm -rf "$PKG"
+
+          [ -n "$APP" ] && cp "$APP" dist/LANChat-x86_64.AppImage"
+          [ -n "$DEB" ] && cp "$DEB" dist/
+          cp README.md dist/README.md
+          ls -l dist
+          file dist/* | sed 's/^/  /'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LANChat-linux-x64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Ringkasan
+        shell: bash
+        run: |
+          echo "### LAN Chat untuk Linux" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- AppImage: jalan di distro mana pun (termasuk Arch)" >> $GITHUB_STEP_SUMMARY
+          echo "- tar.gz: dipakai PKGBUILD Arch" >> $GITHUB_STEP_SUMMARY
+          echo "- deb: Debian/Ubuntu" >> $GITHUB_STEP_SUMMARY

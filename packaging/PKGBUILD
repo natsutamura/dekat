@@ -1,0 +1,36 @@
+# Maintainer: ray <ray@vuelabs.id>
+# PKGBUILD untuk Arch Linux / CachyOS.
+#
+# Paket ini memasang binary yang sudah dibangun (tar.gz dari GitHub Actions),
+# bukan mengompilasi ulang — build Tauri butuh WebKitGTK 4.1 dan memakan
+# 15+ menit. Kalau kamu mau kompilasi sendiri, ganti source=() dengan repo git
+# dan isi build()/package() dengan `cargo build --release`.
+pkgname=lanchat-bin
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Chat, kirim file, dan panggilan suara peer-to-peer di jaringan lokal (tanpa server)"
+arch=('x86_64')
+url="https://github.com/natsutamura/lanchat"
+license=('MIT')
+depends=(
+  'webkit2gtk-4.1'
+  'gtk3'
+  'libayatana-appindicator'
+  'librsvg'
+  'hicolor-icon-theme'
+)
+provides=('lanchat')
+conflicts=('lanchat')
+options=('!strip')   # binary sudah di-strip oleh profil release
+
+source=("https://github.com/natsutamura/lanchat/releases/download/v${pkgver}/lanchat-${pkgver}-linux-x64.tar.gz")
+sha256sums=('SKIP')  # ganti dengan hash asli: `updpkgsums`
+
+package() {
+  install -Dm755 "${srcdir}/lanchat-${pkgver}-linux-x64/usr/bin/lanchat" \
+    "${pkgdir}/usr/bin/lanchat"
+  install -Dm644 "${srcdir}/lanchat-${pkgver}-linux-x64/usr/share/applications/lanchat.desktop" \
+    "${pkgdir}/usr/share/applications/lanchat.desktop"
+  install -Dm644 "${srcdir}/lanchat-${pkgver}-linux-x64/usr/share/icons/hicolor/512x512/apps/lanchat.png" \
+    "${pkgdir}/usr/share/icons/hicolor/512x512/apps/lanchat.png"
+}

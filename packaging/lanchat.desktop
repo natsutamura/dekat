@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=LAN Chat
+GenericName=LAN Messenger
+Comment=Chat, kirim file, dan panggilan suara di jaringan lokal tanpa server
+Exec=lanchat
+Icon=lanchat
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=chat;lan;local;peer;messenger;
+StartupWMClass=lanchat-desktop
