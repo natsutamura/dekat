@@ -802,6 +802,14 @@ fn main() {
 
             let mut cfg = Config::new(name, dir.clone());
             cfg.port = port;
+            // LANCHAT_SEED="192.168.1.20:41234,192.168.1.21:41234" untuk jaringan
+            // yang memblok multicast (announce dikirim unicast ke alamat ini juga).
+            if let Ok(seeds) = std::env::var("LANCHAT_SEED") {
+                cfg.seeds = seeds
+                    .split(',')
+                    .filter_map(|s| s.trim().parse().ok())
+                    .collect();
+            }
             // Fallback kalau jaringan memblok multicast: LANCHAT_SEEDS="10.10.1.31:41235,..."
             if let Ok(s) = std::env::var("LANCHAT_SEEDS") {
                 cfg.seeds = s

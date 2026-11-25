@@ -33,12 +33,12 @@ File Linux (`lanchat-desktop`) tidak jalan di Windows — beda platform, harus d
    langsung satu sama lain. Ini di luar kendali aplikasi; pakai hotspot HP atau kabel LAN.
 3. Cek firewall: `Windows Defender Firewall → Allow an app` → pastikan LANChat dicentang
    untuk Private.
-4. Sebagian router memblok multicast → tambahkan seed manual lewat env:
+4. Sebagian router memblok multicast → tambahkan seed manual lewat env (alamat peer lain,
+   port UDP discovery 41234):
    ```cmd
    set LANCHAT_SEED=192.168.1.20:41234 & LANChat.exe
    ```
-   (fitur seed dari env belum ada di build ini — gunakan versi CLI `lanchat.exe` dengan
-   `--seed 192.168.1.20:41234` untuk sementara)
+   Bisa lebih dari satu, pisahkan koma: `192.168.1.20:41234,192.168.1.21:41234`
 
 ## Data disimpan di mana
 
