@@ -14,6 +14,7 @@ pub mod identity;
 pub mod node;
 pub mod proto;
 pub mod store;
+pub mod tls;
 
 pub use files::{FileMeta, FileTransfer, Transfer};
 pub use node::{Config, Event, Node, Peer};

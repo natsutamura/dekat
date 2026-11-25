@@ -1,4 +1,4 @@
-# Protokol LAN Chat v4 (M1 + M3 + M5)
+# Protokol LAN Chat v5 (M1 + M3 + M5 + TLS)
 
 Tanpa server. Semua node setara (peer-to-peer). Angka port ada di `crates/core/src/proto.rs`.
 
@@ -27,17 +27,56 @@ Payload `Announce` (JSON, UTF-8):
 - `status` — `online` | `idle` | `dnd` (field opsional, klien lama dianggap `online`)
 - penerima mengabaikan announce dengan `id` miliknya sendiri
 
-## 2. Transport (TCP + framing)
+## 2. Transport (TLS + TCP + framing)
 
-Frame = `u32 BE length` + JSON body. Batas 8 MiB (nanti untuk file chunk).
+**Sejak v5 semua koneksi TCP dibungkus TLS 1.3.** Tidak ada mode plaintext kecuali
+dinyalakan manual dengan `LANCHAT_ALLOW_PLAINTEXT=1` (untuk bicara dengan build lama).
 
-Handshake: **kedua sisi mengirim `hello` segera setelah koneksi terbuka**, lalu membaca
-`hello` lawan. Frame pertama yang bukan `hello` → koneksi ditolak.
+### 2.1 Handshake
+
+```
+TCP connect
+  └─ TLS handshake (self-signed, rustls, TLS 1.3; sertifikat TIDAK dipakai memutuskan percaya)
+      └─ hello   (plain, kedua arah, berisi id + pk)
+          └─ auth (tanda tangan Ed25519 atas exporter sesi TLS)  ← kedua arah
+              └─ frame biasa (text/ack/file/call/…)
+```
+
+Frame = `u32 BE length` + JSON body. Batas 8 MiB. Panjang di luar `1..=8 MiB` → koneksi diputus.
 
 ```json
-{"t":"hello","v":2,"id":"...","name":"ray","fp":"ray#7fda","port":42001,"status":"online"}
-{"t":"text","id":"4ba15ab0c1d2e3f4","from":"...","from_name":"ray","to":"*","ts":1795...,"body":"halo"}
-{"t":"ack","id":"4ba15ab0c1d2e3f4","ts":1795...}
+{"Hello":{"v":3,"id":"7fda069ad40267af","name":"ray","fp":"ray#7fda","port":42001,"os":"linux","status":"online","sig":"","pk":""}}
+{"Auth":{"pk":"<64 hex>","sig":"<128 hex>"}}
+{"Text":{"id":"4ba15ab0c1d2e3f4","from":"...","from_name":"ray","to":"*","ts":1795...,"body":"halo"}}
+```
+
+### 2.2 Kenapa sertifikat self-signed tidak jadi masalah
+
+Sertifikat hanya menyediakan **kunci sesi**, bukan identitas. Verifikator sengaja
+menerima sertifikat apa pun (`AcceptAnyCert`). Identitas dibuktikan di langkah `auth`:
+
+1. Kedua ujung memanggil `export_keying_material(label="EXPORTER-lanchat-channel-v1", 32 byte)`.
+   Nilai ini diturunkan dari rahasia sesi TLS → **hanya diketahui kedua ujung**.
+2. Tiap sisi menandatangani `HELLO_CTX ‖ exporter ‖ 0 ‖ min(id_a,id_b) ‖ 0 ‖ max(id_a,id_b)`
+   dengan kunci Ed25519-nya, lalu mengirim `Auth{pk, sig}`.
+3. Penerima memverifikasi: `sig` sah **dan** 8 byte pertama `pk` == `id` peer.
+
+**Kenapa exporter wajib ada:** tanpa itu, penyerang bisa menjadi relay — meneruskan
+tanda tangan asli A ke B dan sebaliknya. Dengan exporter, tanda tangan A terikat pada
+sesi TLS A↔MITM, sehingga tidak sah di sesi MITM↔B. Relay gagal total.
+
+**Batas yang jujur:** penyerang yang menguasai jaringan **saat pertama kali** dua node
+bertemu bisa menyamar (tidak ada PKI/OOB pairing). Ini batas semua aplikasi LAN tanpa
+server; mitigasinya pairing QR di M6, bukan TLS.
+
+### 2.3 Status peer
+
+| field | arti |
+|---|---|
+| `verified: true` | identitas dibuktikan tanda tangan di sesi TLS ini |
+| `verified: false` | berasal dari announce multicast saja, atau peer lama (plaintext) |
+
+`verified` hanya boleh naik, tidak pernah turun (announce tidak menghapus bukti TLS).
 {"t":"typing","from":"...","to":"<peer-id>","on":true}
 {"t":"read","from":"...","to":"<peer-id>","up_to_ts":1795...}
 {"t":"presence","id":"...","status":"dnd"}

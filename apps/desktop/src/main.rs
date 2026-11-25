@@ -877,6 +877,9 @@ fn main() {
 
             let mut cfg = Config::new(name, dir.clone());
             cfg.port = port;
+            // Default: hanya peer yang mendukung TLS. Dinyalakan lewat env kalau
+            // memang harus bicara dengan build lama (risiko penyadapan diterima).
+            cfg.allow_plaintext = std::env::var("LANCHAT_ALLOW_PLAINTEXT").is_ok();
             // LANCHAT_SEED="192.168.1.20:41234,192.168.1.21:41234" untuk jaringan
             // yang memblok multicast (announce dikirim unicast ke alamat ini juga).
             if let Ok(seeds) = std::env::var("LANCHAT_SEED") {

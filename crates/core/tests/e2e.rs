@@ -318,3 +318,184 @@ async fn call_tanpa_koneksi_gagal_dengan_jelas() {
     let err = a.call_offer("peer-hilang", "c3", "offer").unwrap_err();
     assert!(err.to_string().contains("koneksi"), "error: {err}");
 }
+
+// ---------------- TLS / autentikasi ----------------
+
+/// Peer yang terhubung lewat jalur normal harus ditandai `verified`.
+#[tokio::test]
+async fn peer_terhubung_ditandai_verified() {
+    let (a, b) = pair().await;
+    let pa = a.peers().into_iter().find(|p| p.id == b.id()).expect("peer B hilang");
+    assert!(pa.verified, "peer lewat TLS harus verified=true");
+    let pb = b.peers().into_iter().find(|p| p.id == a.id()).expect("peer A hilang");
+    assert!(pb.verified, "sisi penerima juga harus verified=true");
+}
+
+/// Inti klaim keamanan: byte di wire tidak boleh mengandung teks asli.
+///
+/// Caranya: buka listener TCP biasa yang meneruskan ke node asli, lalu dial
+/// lewat listener itu (jadi kita melihat persis byte yang dikirim A ke B).
+/// Kalau TLS bekerja, teks "rahasia-sekali" tidak akan pernah muncul.
+#[tokio::test]
+async fn wire_tidak_bocorkan_plaintext() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let b = Node::start(cfg("b")).await.unwrap();
+    let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), b.port());
+
+    // Proxy transparan: catat semua byte yang lewat.
+    let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy.local_addr().unwrap();
+    let captured: std::sync::Arc<std::sync::Mutex<Vec<u8>>> = Default::default();
+    let cap2 = captured.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut inbound, _)) = proxy.accept().await else { break };
+            let cap = cap2.clone();
+            tokio::spawn(async move {
+                let Ok(mut outbound) = tokio::net::TcpStream::connect(target).await else { return };
+                // into_split: half milik sendiri ('static) supaya bisa dipindah ke task.
+                let (mut ir, mut iw) = inbound.into_split();
+                let (mut or, mut ow) = outbound.into_split();
+                let c1 = cap.clone();
+                let up = tokio::spawn(async move {
+                    let mut buf = [0u8; 8192];
+                    while let Ok(n) = ir.read(&mut buf).await {
+                        if n == 0 { break }
+                        c1.lock().unwrap().extend_from_slice(&buf[..n]);
+                        if ow.write_all(&buf[..n]).await.is_err() { break }
+                    }
+                });
+                let down = tokio::spawn(async move {
+                    let mut buf = [0u8; 8192];
+                    while let Ok(n) = or.read(&mut buf).await {
+                        if n == 0 { break }
+                        if iw.write_all(&buf[..n]).await.is_err() { break }
+                    }
+                });
+                let _ = tokio::join!(up, down);
+            });
+        }
+    });
+
+    let a = Node::start(cfg("a")).await.unwrap();
+    let a2 = a.clone();
+    tokio::spawn(async move {
+        let _ = a2.connect_peer(proxy_addr).await;
+    });
+    for _ in 0..80 {
+        if a.is_connected(b.id()) { break }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(a.is_connected(b.id()), "A gagal terhubung lewat proxy");
+
+    const RAHASIA: &str = "rahasia-sekali-jangan-sampai-bocor";
+    a.send_text(b.id(), RAHASIA).unwrap();
+
+    // tunggu pesan benar-benar sampai (membuktikan jalur hidup & data terkirim)
+    let mut ev = b.subscribe();
+    let ok = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::Text { body, .. }) = ev.recv().await {
+                if body == RAHASIA { break true }
+            }
+        }
+    }).await.unwrap_or(false);
+    assert!(ok, "pesan tidak sampai ke B");
+
+    let bytes = captured.lock().unwrap().clone();
+    assert!(bytes.len() > 100, "tidak ada byte tertangkap (proxy tidak dilewati?)");
+    let hay = String::from_utf8_lossy(&bytes);
+    assert!(!hay.contains(RAHASIA), "PLAINTEXT BOCOR di wire: teks asli terlihat");
+    assert!(!hay.contains("hello"), "frame JSON terlihat di wire (TLS tidak aktif)");
+    // sanity: byte pertama harus TLS record handshake (0x16) — bukan JSON '{'
+    assert_ne!(bytes[0], b'{', "wire dimulai dengan JSON, berarti tidak ada TLS");
+}
+
+/// Peer tanpa TLS harus DITOLAK secara default (bukan diam-diam diterima).
+#[tokio::test]
+async fn peer_plaintext_ditolak_default() {
+    use tokio::io::AsyncWriteExt;
+
+    let b = Node::start(cfg("b")).await.unwrap();
+    let mut raw = tokio::net::TcpStream::connect(("127.0.0.1", b.port())).await.unwrap();
+
+    // Kirim frame JSON telanjang seperti build lama (tanpa TLS).
+    let body = br#"{"Hello":{"v":2,"id":"deadbeefdeadbeef","name":"lama","fp":"lama#dead","port":1234,"os":"linux"}}"#;
+    let mut buf = (body.len() as u32).to_be_bytes().to_vec();
+    buf.extend_from_slice(body);
+    let _ = raw.write_all(&buf).await;
+
+    // Server harus menutup koneksi tanpa pernah menganggapnya peer.
+    let mut sink = [0u8; 64];
+    use tokio::io::AsyncReadExt;
+    let n = timeout(Duration::from_secs(5), raw.read(&mut sink)).await.unwrap_or(Ok(0)).unwrap_or(0);
+    let closed_or_tls_error = n == 0 || sink[..n].first() == Some(&0x15); // 0x15 = TLS alert
+    assert!(closed_or_tls_error, "server membalas data non-TLS (n={n})");
+    assert!(
+        b.peers().is_empty(),
+        "peer plaintext tidak boleh masuk daftar peer"
+    );
+}
+
+/// Status `verified` tidak boleh hilang setelah upsert berikutnya.
+#[tokio::test]
+async fn verified_tidak_turun_oleh_announce() {
+    let (a, b) = pair().await;
+    // a sudah punya peer b lewat TLS
+    let before = a.peers().into_iter().find(|p| p.id == b.id()).unwrap();
+    assert!(before.verified);
+
+    // Simulasikan announce multicast yang sama (verified=false) datang belakangan
+    // dengan menyalakan node ketiga yang meng-announce id b — bukan hal yang bisa
+    // dilakukan test dari luar, jadi cukup pastikan status tidak berubah setelah
+    // pengiriman pesan rutin (jalur upsert lain).
+    a.send_text(b.id(), "tes").unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let after = a.peers().into_iter().find(|p| p.id == b.id()).unwrap();
+    assert!(after.verified, "verified hilang setelah upsert berikutnya");
+}
+
+/// Serangan relay: penyerang memegang dua sesi TLS terpisah (A↔M dan M↔B)
+/// lalu meneruskan frame apa adanya. Tanda tangan hello terikat ke exporter
+/// masing-masing sesi, jadi A tidak bisa memakai tanda tangan B dan sebaliknya.
+///
+/// Yang diuji di sini: relay tidak bisa membuat A mengira sedang bicara dengan B
+/// dengan memindahkan tanda tangan. Kita buktikan dengan menyalin frame `Auth`
+/// dari sesi lain — harus ditolak.
+#[tokio::test]
+async fn tanda_tangan_tidak_bisa_dipakai_ulang_di_sesi_lain() {
+    use lanchat_core::identity::Identity;
+
+    // Dua identitas nyata.
+    let dir_a = tmp_dir("id-a");
+    let dir_b = tmp_dir("id-b");
+    let ia = Identity::load_or_create(&dir_a, "a").unwrap();
+    let ib = Identity::load_or_create(&dir_b, "b").unwrap();
+
+    // Sesi 1: A↔B (exporter asli).
+    let ex1 = [1u8; 32];
+    let msg1 = lanchat_core::tls::hello_msg(&ex1, &ia.id(), &ib.id());
+
+    // Sesi 2: sesi lain (exporter berbeda) antara pasangan yang sama.
+    let ex2 = [2u8; 32];
+    let msg2 = lanchat_core::tls::hello_msg(&ex2, &ia.id(), &ib.id());
+
+    let sig_sesi1 = ia.sign_hex(&msg1);
+
+    // Tanda tangan sesi 1 sah di sesi 1...
+    assert!(Identity::verify_hex(&ia.pk_hex(), &msg1, &sig_sesi1, Some(&ia.id())).is_ok());
+
+    // ...tapi TIDAK sah di sesi 2, walau pasangan id sama. Inilah yang mematikan relay.
+    let hasil = Identity::verify_hex(&ia.pk_hex(), &msg2, &sig_sesi1, Some(&ia.id()));
+    assert!(hasil.is_err(), "tanda tangan sesi lain diterima — relay bisa menembus");
+
+    // Dan tanda tangan B tidak bisa dipakai mengaku sebagai A (id != pk prefix).
+    let sig_b = ib.sign_hex(&msg1);
+    assert!(Identity::verify_hex(&ib.pk_hex(), &msg1, &sig_b, Some(&ia.id())).is_err(),
+        "id palsu diterima: peer mengaku ber-id A dengan kunci B");
+
+    let _ = std::fs::remove_dir_all(&dir_a);
+    let _ = std::fs::remove_dir_all(&dir_b);
+}

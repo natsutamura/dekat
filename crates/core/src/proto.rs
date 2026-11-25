@@ -91,6 +91,27 @@ pub enum Frame {
         os: String,
         #[serde(default)]
         status: Status,
+        /// Tanda tangan Ed25519 (hex) atas `tls::hello_msg`.
+        ///
+        /// Default kosong = peer lama (pra-TLS). Koneksi tanpa tanda tangan
+        /// hanya diterima di mode kompatibilitas, dan dianggap "belum terverifikasi".
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        sig: String,
+        /// Public key Ed25519 lengkap (hex 32 byte). Wajib ada kalau `sig` ada;
+        /// `id` harus sama dengan 8 byte pertamanya. Dikirim eksplisit supaya
+        /// penerima bisa memverifikasi tanda tangan tanpa menebak dari `id`.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        pk: String,
+    },
+    /// Bukti identitas: tanda tangan Ed25519 atas sesi TLS ini.
+    ///
+    /// Dikirim kedua arah setelah `Hello`, karena tanda tangan mengikat
+    /// pasangan id — dan id peer baru diketahui setelah `Hello` diterima.
+    Auth {
+        /// Public key Ed25519 lengkap (hex 32 byte).
+        pk: String,
+        /// Tanda tangan hex atas `tls::hello_msg`.
+        sig: String,
     },
     Text {
         id: String,

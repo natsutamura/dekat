@@ -9,6 +9,7 @@ use crate::{
     files::FileTransfer,
     identity::Identity,
     proto::*,
+    tls::Tls,
 };
 use anyhow::{bail, Context, Result};
 use std::{
@@ -33,6 +34,11 @@ pub struct Config {
     pub seeds: Vec<SocketAddr>,
     /// matikan presence multicast (dipakai test supaya tidak saling ganggu)
     pub discovery: bool,
+    /// Terima peer versi lama yang belum mendukung TLS.
+    ///
+    /// Default `false`: koneksi tanpa TLS **ditolak**. Dinyalakan hanya kalau user
+    /// memang perlu bicara dengan build lama — dan itu membuka risiko penyadapan.
+    pub allow_plaintext: bool,
 }
 
 impl Config {
@@ -43,6 +49,7 @@ impl Config {
             data_dir: data_dir.into(),
             seeds: Vec::new(),
             discovery: true,
+            allow_plaintext: false,
         }
     }
 }
@@ -57,6 +64,9 @@ pub struct Peer {
     pub last_seen: u64,
     pub status: Status,
     pub online: bool,
+    /// Identitas peer sudah dibuktikan lewat tanda tangan di atas sesi TLS.
+    /// `false` = peer lama (plaintext) yang diterima karena `allow_plaintext`.
+    pub verified: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -177,6 +187,9 @@ struct Inner {
     /// offer yang sedang menunggu jawaban peer: msg_id → (accept_tx, done_tx)
     pending_accept: Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
     pending_done: Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
+    tls: Tls,
+    identity: Identity,
+    allow_plaintext: bool,
 }
 
 #[derive(Clone)]
@@ -201,6 +214,8 @@ impl Node {
             ts: now_ms(),
         }));
 
+        let tls = Tls::init(&cfg.data_dir)?;
+
         let (events, _) = broadcast::channel(512);
         let node = Node(Arc::new(Inner {
             id: identity.id(),
@@ -216,6 +231,9 @@ impl Node {
             transfers: FileTransfer::new(),
             pending_accept: Mutex::new(HashMap::new()),
             pending_done: Mutex::new(HashMap::new()),
+            tls,
+            identity,
+            allow_plaintext: cfg.allow_plaintext,
         }));
 
         node.clone().spawn_acceptor(listener);
@@ -718,6 +736,8 @@ impl Node {
             last_seen: now_ms(),
             status: a.status,
             online: true,
+            // Dari announce multicast: belum ada bukti kriptografis.
+            verified: false,
         };
         let (is_new, status_changed) = self.upsert_peer(peer.clone());
         if is_new {
@@ -749,6 +769,10 @@ impl Node {
                     old.os = p.os;
                 }
                 old.addr = SocketAddr::new(p.addr.ip(), p.addr.port());
+                // `verified` hanya boleh naik, tidak boleh turun: announce multicast
+                // tidak membawa bukti, sedangkan handshake TLS membawanya. Kalau
+                // announce datang belakangan, status terverifikasi tidak boleh hilang.
+                old.verified = old.verified || p.verified;
                 (false, status_changed)
             }
             None => {
@@ -787,14 +811,34 @@ impl Node {
 
     async fn handle_conn(&self, stream: TcpStream, addr: SocketAddr, outbound: bool) -> Result<()> {
         let _ = stream.set_nodelay(true);
-        let (mut rd, mut wr) = stream.into_split();
+        let tls = self.0.tls.clone();
 
+        // Handshake TLS dulu: setelah ini seluruh frame (termasuk file) terenkripsi.
+        // `exporter` adalah material rahasia sesi; dipakai mengikat tanda tangan hello
+        // ke koneksi ini sehingga tanda tangan tidak bisa dipakai ulang di sesi lain.
         if outbound {
-            tracing::debug!("dial keluar ke {addr}");
+            let s = tls.connect(stream).await?;
+            let ex = crate::tls::exporter_client(s.get_ref().1)?;
+            self.run_conn(s, addr, true, ex).await
+        } else {
+            let s = tls.accept(stream).await?;
+            let ex = crate::tls::exporter_server(s.get_ref().1)?;
+            self.run_conn(s, addr, false, ex).await
+        }
+    }
+
+    /// Bagian protokol setelah TLS siap: tukar hello + auth, lalu loop frame.
+    async fn run_conn<S>(&self, s: S, addr: SocketAddr, outbound: bool, exporter: [u8; 32]) -> Result<()>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + 'static,
+    {
+        if outbound {
+            tracing::debug!("dial keluar ke {addr} (TLS)");
         }
 
-        // Hello dikirim dua arah (dialer maupun penerima) — tanpa ini sisi
-        // inbound akan menunggu selamanya dan koneksi tidak pernah siap.
+        let (mut rd, mut wr) = tokio::io::split(s);
+
+        // 1. Tukar Hello (belum bertanda tangan — id peer belum diketahui).
         let hello = Frame::Hello {
             v: PROTO_VERSION,
             id: self.0.id.clone(),
@@ -803,20 +847,16 @@ impl Node {
             port: self.0.port,
             os: std::env::consts::OS.to_string(),
             status: self.status(),
+            sig: String::new(),
+            pk: String::new(),
         };
         write_frame(&mut wr, &hello).await.context("kirim hello")?;
 
         let (pid, pname, pfp, pport, pos, pstatus) =
             match read_frame(&mut rd).await.context("baca hello")? {
-                Some(Frame::Hello {
-                    id,
-                    name,
-                    fp,
-                    port,
-                    os,
-                    status,
-                    ..
-                }) => (id, name, fp, port, os, status),
+                Some(Frame::Hello { id, name, fp, port, os, status, .. }) => {
+                    (id, name, fp, port, os, status)
+                }
                 Some(f) => bail!("frame pertama bukan hello: {f:?}"),
                 None => return Ok(()),
             };
@@ -824,13 +864,44 @@ impl Node {
             bail!("menerima koneksi dari diri sendiri");
         }
 
+        // 2. Tukar Auth: tanda tangan atas exporter sesi + kedua id.
+        let my_sig = self.0.identity.sign_hex(&crate::tls::hello_msg(&exporter, &self.0.id, &pid));
+        write_frame(
+            &mut wr,
+            &Frame::Auth { pk: self.0.identity.pk_hex(), sig: my_sig },
+        )
+        .await
+        .context("kirim auth")?;
+
+        let verified = match read_frame(&mut rd).await.context("baca auth")? {
+            Some(Frame::Auth { pk, sig }) => {
+                let basis = crate::tls::hello_msg(&exporter, &self.0.id, &pid);
+                crate::identity::Identity::verify_hex(&pk, &basis, &sig, Some(&pid))
+                    .with_context(|| format!("verifikasi identitas {pname} ({pid})"))?;
+                true
+            }
+            // Peer lama: tidak bisa membuktikan identitas.
+            Some(other) => {
+                if !self.0.allow_plaintext {
+                    bail!("peer {pname} ({pid}) tidak mendukung autentikasi TLS — koneksi ditolak (frame: {other:?})");
+                }
+                self.emit(Event::Warn(format!(
+                    "{pname} terhubung tanpa verifikasi identitas — isi chat tidak dijamin aman"
+                )));
+                // Frame ini bukan Auth, jadi harus tetap diproses sebagai frame biasa.
+                self.handle_frame(other).await.ok();
+                false
+            }
+            None => return Ok(()),
+        };
+
         let (tx, mut rx) = mpsc::channel::<Frame>(256);
-        let replaced = self.0.conns.lock().unwrap().insert(pid.clone(), tx);
-        if replaced.is_some() {
+        if self.0.conns.lock().unwrap().insert(pid.clone(), tx).is_some() {
             tracing::debug!("koneksi lama ke {pid} diganti yang baru");
         }
         self.0.connecting.lock().unwrap().remove(&pid);
 
+        // `wr` (WriteHalf) dipindah ke task penulis; `rd` tetap di sini.
         let writer = tokio::spawn(async move {
             while let Some(f) = rx.recv().await {
                 if write_frame(&mut wr, &f).await.is_err() {
@@ -848,15 +919,13 @@ impl Node {
             last_seen: now_ms(),
             status: pstatus,
             online: true,
+            verified,
         };
         let (is_new, status_changed) = self.upsert_peer(peer.clone());
         if is_new {
             self.emit(Event::PeerUp(peer.clone()));
         } else if status_changed {
-            self.emit(Event::PeerStatus {
-                id: peer.id.clone(),
-                status: peer.status,
-            });
+            self.emit(Event::PeerStatus { id: peer.id.clone(), status: peer.status });
         }
 
         let res = loop {
@@ -879,6 +948,9 @@ impl Node {
     async fn handle_frame(&self, f: Frame) -> Result<()> {
         match f {
             Frame::Hello { .. } => {}
+            // Auth hanya diproses di fase handshake (run_conn). Kalau muncul lagi
+            // di tengah sesi, abaikan: identitas sudah ditetapkan saat koneksi dibuka.
+            Frame::Auth { .. } => {}
             Frame::Text {
                 id,
                 from,

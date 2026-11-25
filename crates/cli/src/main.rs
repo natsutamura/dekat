@@ -51,6 +51,7 @@ fn parse_args() -> Result<Config> {
         data_dir,
         seeds,
         discovery: true,
+        allow_plaintext: std::env::var("LANCHAT_ALLOW_PLAINTEXT").is_ok(),
     })
 }
 
