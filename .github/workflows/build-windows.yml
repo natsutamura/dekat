@@ -49,7 +49,7 @@ jobs:
           if (-not $msi) { throw "MSI tidak dihasilkan" }
           Copy-Item $msi.FullName "dist/LANChat-$($msi.Name -replace '.*_','')"
           if ($nsis) { Copy-Item $nsis.FullName "dist/LANChat-setup.exe" }
-          Copy-Item ../../README.md dist/README.md
+          Copy-Item README.md dist/README.md
           Get-ChildItem dist | Select-Object Name, Length
           $mb = [math]::Round($msi.Length / 1MB, 2)
           "UKURAN_MSI=$mb MB" | Out-File -FilePath $env:GITHUB_ENV -Append

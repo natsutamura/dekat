@@ -2263,7 +2263,7 @@ dependencies = [
 
 [[package]]
 name = "lanchat-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "lanchat-core",
@@ -2275,7 +2275,7 @@ dependencies = [
 
 [[package]]
 name = "lanchat-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2297,7 +2297,7 @@ dependencies = [
 
 [[package]]
 name = "lanchat-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
