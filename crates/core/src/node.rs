@@ -6,6 +6,7 @@
 
 use crate::{
     discovery::{self, Seen},
+    files::FileTransfer,
     identity::Identity,
     proto::*,
 };
@@ -13,7 +14,7 @@ use anyhow::{bail, Context, Result};
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -90,6 +91,43 @@ pub enum Event {
         id: String,
         status: Status,
     },
+    /// File ditawarkan (masuk). `accepted=false` berarti kita menolak.
+    FileOffer {
+        id: String,
+        from: String,
+        from_name: String,
+        to: String,
+        name: String,
+        size: u64,
+        ts: u64,
+        mine: bool,
+        members: Option<Vec<String>>,
+    },
+    /// Progres transfer (keluar atau masuk), dipakai UI buat progress bar.
+    FileProgress {
+        id: String,
+        name: String,
+        sent_bytes: u64,
+        total_bytes: u64,
+        outgoing: bool,
+    },
+    /// File selesai diterima & sha256 cocok, atau gagal.
+    FileReceived {
+        id: String,
+        from: String,
+        from_name: String,
+        to: String,
+        name: String,
+        size: u64,
+        path: String,
+        ts: u64,
+        members: Option<Vec<String>>,
+    },
+    FileFailed {
+        id: String,
+        name: String,
+        reason: String,
+    },
     Warn(String),
 }
 
@@ -103,6 +141,11 @@ struct Inner {
     conns: Mutex<HashMap<String, mpsc::Sender<Frame>>>,
     connecting: Mutex<HashSet<String>>,
     events: broadcast::Sender<Event>,
+    files_dir: PathBuf,
+    transfers: FileTransfer,
+    /// offer yang sedang menunggu jawaban peer: msg_id → (accept_tx, done_tx)
+    pending_accept: Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
+    pending_done: Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
 }
 
 #[derive(Clone)]
@@ -138,6 +181,10 @@ impl Node {
             conns: Mutex::new(HashMap::new()),
             connecting: Mutex::new(HashSet::new()),
             events,
+            files_dir: cfg.data_dir.join("files"),
+            transfers: FileTransfer::new(),
+            pending_accept: Mutex::new(HashMap::new()),
+            pending_done: Mutex::new(HashMap::new()),
         }));
 
         node.clone().spawn_acceptor(listener);
@@ -167,6 +214,11 @@ impl Node {
 
     pub fn status(&self) -> Status {
         self.0.announce.lock().unwrap().status
+    }
+
+    /// Folder tempat file masuk disimpan.
+    pub fn files_dir(&self) -> PathBuf {
+        self.0.files_dir.clone()
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
@@ -280,6 +332,150 @@ impl Node {
         drop(conns);
         let _ = tx.try_send(frame);
         Ok(())
+    }
+
+    /// Kirim file ke satu peer. Mengembalikan `msg_id`.
+    ///
+    /// Alur: offer → tunggu accept → stream chunk → tunggu done.
+    /// Semua langkah punya timeout supaya UI tidak menggantung kalau peer diam.
+    pub async fn send_file(&self, to: &str, path: &Path, timeout_secs: u64) -> Result<String> {
+        let meta = FileTransfer::prepare(path)?;
+        let tx = self
+            .0
+            .conns
+            .lock()
+            .unwrap()
+            .get(to)
+            .cloned()
+            .with_context(|| format!("tidak ada koneksi ke {to}"))?;
+
+        let msg_id = new_msg_id();
+        let ts = now_ms();
+
+        let (accept_tx, accept_rx) = tokio::sync::oneshot::channel();
+        self.0
+            .pending_accept
+            .lock()
+            .unwrap()
+            .insert(msg_id.clone(), accept_tx);
+
+        let offer = Frame::FileOffer {
+            id: msg_id.clone(),
+            from: self.0.id.clone(),
+            from_name: self.0.name.clone(),
+            to: to.to_string(),
+            name: meta.name.clone(),
+            size: meta.size,
+            sha256: meta.sha256.clone(),
+            chunks: meta.chunks,
+            ts,
+            members: None,
+        };
+        if tx.send(offer).await.is_err() {
+            self.0.pending_accept.lock().unwrap().remove(&msg_id);
+            bail!("koneksi ke {to} tertutup sebelum file ditawarkan");
+        }
+
+        // tunggu keputusan peer
+        let accepted = match tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            accept_rx,
+        )
+        .await
+        {
+            Ok(Ok(v)) => v,
+            Ok(Err(_)) => bail!("transfer dibatalkan sebelum peer menjawab"),
+            Err(_) => {
+                self.0.pending_accept.lock().unwrap().remove(&msg_id);
+                bail!("peer tidak menjawab tawaran file dalam {timeout_secs} detik");
+            }
+        };
+        if !accepted {
+            self.emit(Event::FileFailed {
+                id: msg_id.clone(),
+                name: meta.name.clone(),
+                reason: "peer menolak file".into(),
+            });
+            bail!("peer menolak file");
+        }
+
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.0
+            .pending_done
+            .lock()
+            .unwrap()
+            .insert(msg_id.clone(), done_tx);
+
+        self.emit(Event::FileOffer {
+            id: msg_id.clone(),
+            from: self.0.id.clone(),
+            from_name: self.0.name.clone(),
+            to: to.to_string(),
+            name: meta.name.clone(),
+            size: meta.size,
+            ts,
+            mine: true,
+            members: None,
+        });
+
+        // stream: kirim potongan lewat kanal writer koneksi
+        let msg_id_clone = msg_id.clone();
+        let transfers = self.0.transfers.clone();
+        let node = self.clone();
+        let path_owned = path.to_path_buf();
+        let meta_for_task = meta.clone();
+        let tx_for_task = tx.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            transfers.stream_file(&msg_id_clone, &path_owned, &meta_for_task, |f| {
+                tx_for_task.try_send(f).is_ok()
+            })
+        })
+        .await
+        .context("task pengiriman file gagal dijalankan")?;
+
+        if let Err(e) = result {
+            self.0.pending_done.lock().unwrap().remove(&msg_id);
+            self.0.transfers.abort_inbound(&msg_id);
+            self.emit(Event::FileFailed {
+                id: msg_id.clone(),
+                name: meta.name.clone(),
+                reason: e.to_string(),
+            });
+            return Err(e);
+        }
+
+        // progres akhir
+        self.emit(Event::FileProgress {
+            id: msg_id.clone(),
+            name: meta.name.clone(),
+            sent_bytes: meta.size,
+            total_bytes: meta.size,
+            outgoing: true,
+        });
+
+        let ok = match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), done_rx)
+            .await
+        {
+            Ok(Ok(v)) => v,
+            Ok(Err(_)) => false,
+            Err(_) => false,
+        };
+        self.0.transfers.finish_outgoing(&msg_id);
+        if !ok {
+            let reason = node
+                .0
+                .transfers
+                .outgoing_progress(&msg_id)
+                .map(|_| "penerima tidak mengonfirmasi file utuh")
+                .unwrap_or("penerima tidak mengonfirmasi file utuh");
+            self.emit(Event::FileFailed {
+                id: msg_id.clone(),
+                name: meta.name.clone(),
+                reason: reason.to_string(),
+            });
+            bail!("{reason}");
+        }
+        Ok(msg_id)
     }
 
     /// Kirim frame teks ke daftar target (peer id atau `*`).
@@ -628,6 +824,148 @@ impl Node {
                 to,
                 up_to_ts,
             }),
+            Frame::FileOffer {
+                id,
+                from,
+                from_name,
+                to,
+                name,
+                size,
+                sha256,
+                chunks,
+                ts,
+                members,
+            } => {
+                // Terima otomatis: file dari peer yang terhubung, ukuran wajar.
+                // Penolakan manual bisa ditambahkan nanti lewat command UI.
+                let res = self.0.transfers.begin_inbound_ctx(
+                    &self.0.files_dir,
+                    &id,
+                    &name,
+                    size,
+                    &sha256,
+                    chunks,
+                    crate::files::FileContext {
+                        from: from.clone(),
+                        from_name: from_name.clone(),
+                        to: self.0.id.clone(),
+                        members: members.clone(),
+                        ts,
+                    },
+                );
+                let accept = match res {
+                    Ok(_) => true,
+                    Err(e) => {
+                        self.emit(Event::FileFailed {
+                            id: id.clone(),
+                            name: name.clone(),
+                            reason: e.to_string(),
+                        });
+                        false
+                    }
+                };
+                // guard diambil & dilepas sebelum await (kalau tidak, future jadi !Send)
+                let sender = self.0.conns.lock().unwrap().get(&from).cloned();
+                if let Some(tx) = sender {
+                    let _ = tx
+                        .send(Frame::FileAccept {
+                            id: id.clone(),
+                            accept,
+                            reason: if accept {
+                                String::new()
+                            } else {
+                                "penerima gagal menyiapkan file".into()
+                            },
+                        })
+                        .await;
+                }
+                if accept {
+                    self.emit(Event::FileOffer {
+                        id,
+                        from,
+                        from_name,
+                        to,
+                        name,
+                        size,
+                        ts,
+                        mine: false,
+                        members,
+                    });
+                }
+            }
+            Frame::FileChunk { id, idx, data } => {
+                match self.0.transfers.write_chunk(&id, idx, &data) {
+                    Ok(Some((path, ctx))) => {
+                        // konfirmasi dikirim ke pengirim yang benar, bukan sembarang koneksi
+                        if let Some(tx) = self.0.conns.lock().unwrap().get(&ctx.from).cloned() {
+                            let _ = tx.try_send(Frame::FileDone {
+                                id: id.clone(),
+                                ok: true,
+                                reason: String::new(),
+                            });
+                        }
+                        let name = path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        // buang prefix "<msg_id>-" yang dipakai supaya nama file unik
+                        let display = name
+                            .strip_prefix(&format!("{id}-"))
+                            .unwrap_or(&name)
+                            .to_string();
+                        self.emit(Event::FileReceived {
+                            id,
+                            from: ctx.from,
+                            from_name: ctx.from_name,
+                            to: ctx.to,
+                            name: display,
+                            size: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+                            path: path.to_string_lossy().to_string(),
+                            ts: ctx.ts.max(now_ms()),
+                            members: ctx.members,
+                        });
+                    }
+                    Ok(None) => {
+                        if let Some(t) = self.0.transfers.incoming_progress(&id) {
+                            self.emit(Event::FileProgress {
+                                id: id.clone(),
+                                name: t.name,
+                                sent_bytes: t.received_bytes,
+                                total_bytes: t.size,
+                                outgoing: false,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        // beri tahu pengirim bahwa file gagal & sudah dihapus
+                        if let Some(ctx_peer) = self.0.transfers.incoming_sender(&id) {
+                            if let Some(tx) = self.0.conns.lock().unwrap().get(&ctx_peer).cloned() {
+                                let _ = tx.try_send(Frame::FileDone {
+                                    id: id.clone(),
+                                    ok: false,
+                                    reason: e.to_string(),
+                                });
+                            }
+                        }
+                        self.0.transfers.abort_inbound(&id);
+                        self.emit(Event::FileFailed {
+                            id: id.clone(),
+                            name: String::new(),
+                            reason: e.to_string(),
+                        });
+                    }
+                }
+            }
+            Frame::FileAccept { id, accept, .. } => {
+                if let Some(tx) = self.0.pending_accept.lock().unwrap().remove(&id) {
+                    let _ = tx.send(accept);
+                }
+            }
+            Frame::FileDone { id, ok, .. } => {
+                if let Some(tx) = self.0.pending_done.lock().unwrap().remove(&id) {
+                    let _ = tx.send(ok);
+                }
+            }
             Frame::Presence { id, status } => {
                 if let Some(p) = self.0.peers.lock().unwrap().get_mut(&id) {
                     p.status = status;

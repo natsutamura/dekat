@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Izin default window utama",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-title"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-title",
+    "dialog:allow-open",
+    "opener:allow-open-path"
+  ]
 }

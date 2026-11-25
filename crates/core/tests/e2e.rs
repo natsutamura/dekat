@@ -163,3 +163,56 @@ async fn os_peer_terisi_dari_handshake() {
     assert_eq!(p.os, std::env::consts::OS, "os peer harus dari hello, bukan \"?\"");
     assert_ne!(p.os, "?");
 }
+
+#[tokio::test]
+async fn kirim_file_sampai_dan_utuh() {
+    use std::io::Write;
+    let (a, b) = pair().await;
+
+    // file sumber 300 KB di dir A
+    let dir_a = std::env::temp_dir().join(format!("lanchat-sendfile-{}", std::process::id()));
+    std::fs::create_dir_all(&dir_a).unwrap();
+    let src = dir_a.join("dokumen.bin");
+    {
+        let mut f = std::fs::File::create(&src).unwrap();
+        let data: Vec<u8> = (0..300 * 1024).map(|i| (i % 253) as u8).collect();
+        f.write_all(&data).unwrap();
+    }
+    let expected = lanchat_core::files::sha256_file(&src).unwrap();
+
+    let mut ev_b = b.subscribe();
+    let a2 = a.clone();
+    let b_id = b.id().to_string();
+    let src2 = src.clone();
+    let send = tokio::spawn(async move { a2.send_file(&b_id, &src2, 10).await });
+
+    // B harus menerima FileReceived dengan path yang isinya sama persis
+    let received_path = timeout(Duration::from_secs(20), async {
+        loop {
+            if let Ok(Event::FileReceived { path, name, .. }) = ev_b.recv().await {
+                return (path, name);
+            }
+        }
+    })
+    .await
+    .expect("B tidak menerima file");
+
+    let (path, name) = received_path;
+    assert_eq!(name, "dokumen.bin");
+    assert_eq!(lanchat_core::files::sha256_file(std::path::Path::new(&path)).unwrap(), expected);
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), 300 * 1024);
+
+    let msg_id = timeout(Duration::from_secs(20), send).await.unwrap().unwrap();
+    assert!(msg_id.is_ok(), "pengirim melaporkan gagal: {msg_id:?}");
+    let _ = std::fs::remove_dir_all(&dir_a);
+}
+
+#[tokio::test]
+async fn kirim_file_tanpa_koneksi_gagal_dengan_jelas() {
+    let (a, _b) = pair().await;
+    let src = std::env::temp_dir().join(format!("lanchat-nofile-{}.bin", std::process::id()));
+    std::fs::write(&src, b"isi").unwrap();
+    let err = a.send_file("peer-yang-tidak-ada", &src, 1).await.unwrap_err();
+    assert!(err.to_string().contains("koneksi"), "pesan error: {err}");
+    let _ = std::fs::remove_file(&src);
+}

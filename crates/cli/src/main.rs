@@ -117,6 +117,29 @@ fn print_event(e: Event) {
             &id[..6.min(id.len())],
             status.as_str()
         ),
+        Event::FileOffer {
+            name, size, mine: false, ..
+        } => println!("  ↓ menerima file: {} ({} byte)", name, size),
+        Event::FileProgress {
+            name,
+            sent_bytes,
+            total_bytes,
+            outgoing,
+            ..
+        } => {
+            let pct = if total_bytes > 0 { sent_bytes * 100 / total_bytes } else { 0 };
+            println!(
+                "  {} {}: {}%",
+                if outgoing { "↑" } else { "↓" },
+                name,
+                pct
+            );
+        }
+        Event::FileReceived { name, path, .. } => {
+            println!("  ✓ file diterima: {} → {}", name, path)
+        }
+        Event::FileFailed { name, reason, .. } => println!("  ✗ transfer gagal {}: {}", name, reason),
+        Event::FileOffer { .. } => {}
         Event::Warn(w) => println!("! {w}"),
     }
 }
@@ -179,6 +202,36 @@ async fn main() -> Result<()> {
                     }
                 );
             }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("/file ") {
+            let mut parts = rest.splitn(2, ' ');
+            let who = parts.next().unwrap_or_default();
+            let path = parts.next().unwrap_or_default().trim();
+            if who.is_empty() || path.is_empty() {
+                println!("  pakai: /file <id|nama> <path>");
+                continue;
+            }
+            match node.find_peer(who) {
+                Some(p) => {
+                    let node2 = node.clone();
+                    let p2 = p.clone();
+                    let path2 = std::path::PathBuf::from(path);
+                    println!("  mengirim {} ke {}…", path, p.name);
+                    tokio::spawn(async move {
+                        match node2.send_file(&p2.id, &path2, 30).await {
+                            Ok(id) => println!("  ✓ file terkirim ({})", &id[..8]),
+                            Err(e) => println!("  ✗ gagal: {e}"),
+                        }
+                    });
+                }
+                None => println!("  peer '{who}' tidak ketemu"),
+            }
+            continue;
+        }
+        if line == "/files" {
+            let dir = node.files_dir();
+            println!("  folder: {}", dir.display());
             continue;
         }
         if line == "/ping" {

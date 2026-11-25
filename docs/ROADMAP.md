@@ -24,7 +24,7 @@ keduanya cuma konsumen event.
 | **M0** ✅ | proto, identity, discovery multicast+fallback, TCP transport, chat teks broadcast & DM, ack | CLI dua mesin saling chat (sudah diuji) |
 | **M1** 🟡 | **selesai**: SQLite riwayat, presence online/idle/dnd, typing, read receipt, unread count, model room/group. **belum**: TLS self-signed + TOFU pinning, signature pesan, reconnect backoff | core stabil |
 | **M2** 🟡 | **selesai**: sidebar + thread, bubble, dark/light, chat bar (emoji/send), avatar inisial + status dot, clear chat, mark read/unread, toast notifikasi, zoom (Ctrl +/-/0/scroll), window resize, custom bubble. **belum**: foto profil/grup (upload gambar), notifikasi OS native | app desktop bisa dipakai harian |
-| **M3** | file & emoji: kirim file chunked + progress + resume, drag & drop, paste gambar, emoji picker, preview gambar | kirim file antar OS |
+| **M3** 🟡 | **selesai**: kirim file chunked (128 KiB) + sha256 + progress + tolak chunk rusak/tidak berurutan + drag & drop + CLI `/file`. **belum**: resume kalau putus, kirim file di grup, preview gambar, paste gambar | kirim file antar perangkat |
 | **M4** | Android: build Tauri mobile, `MulticastLock`, izin `NEARBY_WIFI_DEVICES` (API 33+), notifikasi lokal, foreground service | HP Android chat di LAN yang sama |
 | **M5** | voice call: WebRTC audio 1:1, lalu group call (mesh ≤6 orang; SFU kecil kalau lebih), indikator mute/speaking | call antar platform |
 | **M6** | polish: onboarding + pairing QR, pengaturan nama/foto, packaging (msi/AppImage/deb/APK), updater | rilis v1.0 |

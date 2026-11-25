@@ -36,6 +36,16 @@ CREATE TABLE IF NOT EXISTS settings (
     k TEXT PRIMARY KEY,
     v TEXT NOT NULL
 );
+
+-- Lampiran per pesan. Satu pesan = maksimal satu file (cukup untuk chat).
+CREATE TABLE IF NOT EXISTS attachments (
+    msg_id    TEXT PRIMARY KEY,
+    file_name TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    sha256    TEXT NOT NULL,
+    mime      TEXT NOT NULL DEFAULT ''
+);
 "#;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +58,21 @@ pub struct StoredMessage {
     pub ts: u64,
     pub mine: bool,
     pub delivered: bool,
+    /// Lampiran (kalau ada). Tidak disimpan di tabel messages, di-join dari `attachments`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<Attachment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Attachment {
+    pub name: String,
+    pub size: u64,
+    /// path absolut di perangkat ini
+    pub path: String,
+    pub sha256: String,
+    /// kosong untuk transfer antar-perangkat (kita tidak menebak mime)
+    #[serde(default)]
+    pub mime: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +113,16 @@ impl Store {
 
     pub fn save_message(&self, m: &StoredMessage) -> Result<()> {
         let db = self.db.lock().unwrap();
+        if let Some(a) = &m.attachment {
+            db.execute(
+                "INSERT INTO attachments (msg_id,file_name,file_size,file_path,sha256,mime)
+                 VALUES (?1,?2,?3,?4,?5,?6)
+                 ON CONFLICT(msg_id) DO UPDATE SET
+                   file_name=excluded.file_name, file_size=excluded.file_size,
+                   file_path=excluded.file_path, sha256=excluded.sha256, mime=excluded.mime",
+                params![m.id, a.name, a.size as i64, a.path, a.sha256, a.mime],
+            )?;
+        }
         db.execute(
             "INSERT OR REPLACE INTO messages (id,thread_id,from_id,from_name,body,ts,mine,delivered)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -103,9 +138,13 @@ impl Store {
             ],
         )?;
         // thread ikut ter-update (preview + waktu terakhir)
+        let preview = match &m.attachment {
+            Some(a) => format!("📎 {}", a.name),
+            None => preview_of(&m.body),
+        };
         db.execute(
             "UPDATE threads SET last_ts=?2, preview=?3 WHERE id=?1",
-            params![m.thread_id, m.ts as i64, preview_of(&m.body)],
+            params![m.thread_id, m.ts as i64, preview],
         )?;
         Ok(())
     }
@@ -169,10 +208,23 @@ impl Store {
     pub fn messages(&self, thread_id: &str, limit: usize) -> Result<Vec<StoredMessage>> {
         let db = self.db.lock().unwrap();
         let mut st = db.prepare(
-            "SELECT id,thread_id,from_id,from_name,body,ts,mine,delivered
-             FROM messages WHERE thread_id=?1 ORDER BY ts DESC LIMIT ?2",
+            "SELECT m.id,m.thread_id,m.from_id,m.from_name,m.body,m.ts,m.mine,m.delivered,
+                    a.file_name,a.file_size,a.file_path,a.sha256,a.mime
+             FROM messages m LEFT JOIN attachments a ON a.msg_id = m.id
+             WHERE m.thread_id=?1 ORDER BY m.ts DESC LIMIT ?2",
         )?;
         let rows = st.query_map(params![thread_id, limit as i64], |r| {
+            let file_name: Option<String> = r.get(8)?;
+            let attachment = match file_name {
+                Some(name) => Some(Attachment {
+                    name,
+                    size: r.get::<_, i64>(9)? as u64,
+                    path: r.get(10)?,
+                    sha256: r.get(11)?,
+                    mime: r.get(12)?,
+                }),
+                None => None,
+            };
             Ok(StoredMessage {
                 id: r.get(0)?,
                 thread_id: r.get(1)?,
@@ -182,6 +234,7 @@ impl Store {
                 ts: r.get::<_, i64>(5)? as u64,
                 mine: r.get::<_, i64>(6)? != 0,
                 delivered: r.get::<_, i64>(7)? != 0,
+                attachment,
             })
         })?;
         let mut out = Vec::new();
@@ -239,6 +292,10 @@ impl Store {
 
     pub fn clear_thread(&self, thread_id: &str) -> Result<()> {
         let db = self.db.lock().unwrap();
+        db.execute(
+            "DELETE FROM attachments WHERE msg_id IN (SELECT id FROM messages WHERE thread_id=?1)",
+            params![thread_id],
+        )?;
         db.execute("DELETE FROM messages WHERE thread_id=?1", params![thread_id])?;
         db.execute(
             "UPDATE threads SET preview='', unread=0, manual_unread=0 WHERE id=?1",
@@ -249,6 +306,10 @@ impl Store {
 
     pub fn delete_thread(&self, thread_id: &str) -> Result<()> {
         let db = self.db.lock().unwrap();
+        db.execute(
+            "DELETE FROM attachments WHERE msg_id IN (SELECT id FROM messages WHERE thread_id=?1)",
+            params![thread_id],
+        )?;
         db.execute("DELETE FROM messages WHERE thread_id=?1", params![thread_id])?;
         db.execute("DELETE FROM threads WHERE id=?1", params![thread_id])?;
         Ok(())
@@ -295,6 +356,7 @@ mod tests {
             ts,
             mine,
             delivered: false,
+            attachment: None,
         }
     }
 
@@ -345,6 +407,49 @@ mod tests {
         assert!(!s.has_unread("g").unwrap());
         s.clear_thread("g").unwrap();
         assert!(s.messages("g", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn attachment_tersimpan_dan_ikut_terhapus() {
+        let s = Store::open_in_memory().unwrap();
+        s.ensure_thread(&Thread {
+            id: "p2".into(),
+            kind: "dm".into(),
+            name: "peer".into(),
+            members: vec!["p2".into()],
+            last_ts: 0,
+            unread: 0,
+            manual_unread: false,
+            preview: String::new(),
+        })
+        .unwrap();
+        let mut m = msg("m9", "p2", 30, true, "");
+        m.attachment = Some(Attachment {
+            name: "laporan.pdf".into(),
+            size: 1234,
+            path: "/tmp/laporan.pdf".into(),
+            sha256: "deadbeef".into(),
+            mime: String::new(),
+        });
+        s.save_message(&m).unwrap();
+
+        let got = s.messages("p2", 10).unwrap();
+        assert_eq!(got.len(), 1);
+        let a = got[0].attachment.as_ref().expect("lampiran hilang");
+        assert_eq!(a.name, "laporan.pdf");
+        assert_eq!(a.size, 1234);
+        assert_eq!(a.sha256, "deadbeef");
+        // preview thread menampilkan nama file, bukan body kosong
+        assert_eq!(s.thread("p2").unwrap().unwrap().preview, "📎 laporan.pdf");
+
+        s.clear_thread("p2").unwrap();
+        assert!(s.messages("p2", 10).unwrap().is_empty());
+        // baris lampiran ikut terhapus, tidak menggantung
+        let n: i64 = {
+            let db = s.db.lock().unwrap();
+            db.query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(n, 0);
     }
 
     #[test]

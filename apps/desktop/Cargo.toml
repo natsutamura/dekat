@@ -14,3 +14,5 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 lanchat-core = { path = "../../crates/core" }
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-opener = "2.7.3"

@@ -45,6 +45,7 @@ Kalau jaringan memblok multicast, tambahkan seed manual: `--seed 10.10.1.28:4123
 | Clear chat | ✅ klik kanan thread → hapus semua pesan |
 | Mark read / unread | ✅ badge unread + tanda manual |
 | Typing indicator | ✅ (DM) |
+| Progress transfer file | ✅ |
 | Read receipt (✓✓) | ✅ |
 | Status online / idle / DND | ✅ + tersebar real-time ke peer |
 | Tema dark / light | ✅ |
@@ -54,7 +55,7 @@ Kalau jaringan memblok multicast, tambahkan seed manual: `--seed 10.10.1.28:4123
 | Avatar inisial + status dot | ✅ |
 | Emoji picker | ✅ |
 | Notifikasi in-app (toast) | ✅ |
-| Kirim file | ⬜ M3 |
+| Kirim file (DM, chunked + sha256) | ✅ tombol lampiran / drag & drop |
 | Voice / video call | ⬜ M5 |
 | Android | ⬜ M4 |
 
@@ -75,9 +76,13 @@ browser tanpa Tauri (data contoh).
 ## Test
 
 ```bash
-cargo test          # 12 test: 8 unit (proto/identity/store) + 4 integrasi dua node nyata
-bash scripts/e2e-m0.sh          # dua instance CLI chat-chatan
-bash scripts/run-desktop-e2e.sh # dua window app desktop di X display
+cargo test                       # 28 test (21 unit + 7 integrasi dua node nyata)
+bash scripts/e2e-m0.sh           # dua instance CLI chat-chatan
+bash scripts/e2e-ui.sh           # dua window app desktop, chat + zoom + tema
+bash scripts/e2e-file.sh         # transfer file via CLI + verifikasi sha256
+bash scripts/e2e-file-ui.sh      # transfer file via dialog GUI asli + sha256
+bash scripts/check-zoom.sh       # zoom lewat keyboard, dibuktikan dari SQLite
+bash scripts/check-dark.sh       # tema dark persisten antar restart
 ```
 
 ## Keamanan (status jujur)

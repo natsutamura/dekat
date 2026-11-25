@@ -3,7 +3,8 @@
 //! App desktop LAN Chat (Tauri v2). Frontend statis ada di `ui/`.
 
 use lanchat_core::{
-    is_room, room_id, Config, Event, Node, Status, Store, StoredMessage, Thread, BROADCAST,
+    is_room, room_id, Attachment, Config, Event, Node, Status, Store, StoredMessage, Thread,
+    BROADCAST,
 };
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
@@ -281,6 +282,138 @@ fn set_setting(state: State<AppState>, key: String, value: String) -> Result<(),
     state.store.set_setting(&key, &value).map_err(e2s)
 }
 
+/// Pilih file lewat dialog OS, lalu kirim ke thread (async supaya UI tidak beku).
+#[tauri::command]
+#[allow(non_snake_case)]
+async fn send_file(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    threadId: String,
+) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Pilih file untuk dikirim")
+        .blocking_pick_file();
+    let path = match picked {
+        Some(f) => f.into_path().map_err(e2s)?,
+        None => return Ok("dibatalkan".into()),
+    };
+
+    let st = state.inner().clone();
+    let t = st
+        .store
+        .thread(&threadId)
+        .map_err(e2s)?
+        .ok_or_else(|| "thread tidak dikenal".to_string())?;
+    if t.kind != "dm" {
+        return Err("kirim file untuk sementara hanya di chat pribadi (DM)".into());
+    }
+
+    let name = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".into());
+    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+
+    match st.node.send_file(&t.id, &path, 30).await {
+        Ok(msg_id) => {
+            let m = StoredMessage {
+                id: msg_id.clone(),
+                thread_id: t.id.clone(),
+                from_id: st.node.id().to_string(),
+                from_name: st.node.name().to_string(),
+                body: String::new(),
+                ts: lanchat_core::proto::now_ms(),
+                mine: true,
+                delivered: true,
+                attachment: Some(Attachment {
+                    name,
+                    size,
+                    path: path.to_string_lossy().to_string(),
+                    sha256: lanchat_core::files::sha256_file(&path).unwrap_or_default(),
+                    mime: String::new(),
+                }),
+            };
+            st.store.save_message(&m).map_err(e2s)?;
+            let _ = app.emit(
+                "lc://file-sent",
+                serde_json::json!({ "threadId": t.id, "message": m }),
+            );
+            Ok(msg_id)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Kirim file dari path eksplisit (dipakai drag & drop dan untuk uji otomatis).
+#[tauri::command]
+#[allow(non_snake_case)]
+async fn send_file_path(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    threadId: String,
+    path: String,
+) -> Result<String, String> {
+    let st = state.inner().clone();
+    let t = st
+        .store
+        .thread(&threadId)
+        .map_err(e2s)?
+        .ok_or_else(|| "thread tidak dikenal".to_string())?;
+    if t.kind != "dm" {
+        return Err("kirim file untuk sementara hanya di chat pribadi (DM)".into());
+    }
+    let p = std::path::PathBuf::from(&path);
+    let name = p
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".into());
+    let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+    let sha = lanchat_core::files::sha256_file(&p).unwrap_or_default();
+
+    let msg_id = st
+        .node
+        .send_file(&t.id, &p, 30)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let m = StoredMessage {
+        id: msg_id.clone(),
+        thread_id: t.id.clone(),
+        from_id: st.node.id().to_string(),
+        from_name: st.node.name().to_string(),
+        body: String::new(),
+        ts: lanchat_core::proto::now_ms(),
+        mine: true,
+        delivered: true,
+        attachment: Some(Attachment {
+            name,
+            size,
+            path,
+            sha256: sha,
+            mime: String::new(),
+        }),
+    };
+    st.store.save_message(&m).map_err(e2s)?;
+    let _ = app.emit(
+        "lc://file-sent",
+        serde_json::json!({ "threadId": t.id, "message": m }),
+    );
+    Ok(msg_id)
+}
+
+/// Buka file hasil terimaan pakai aplikasi default OS.
+#[tauri::command]
+fn open_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 #[allow(non_snake_case)] // argumen camelCase biar cocok dengan invoke() di JS
 fn peers(state: State<AppState>) -> Result<Vec<PeerDto>, String> {
@@ -361,6 +494,7 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
                 ts,
                 mine,
                 delivered: false,
+                attachment: None,
             };
             if st.store.save_message(&msg).is_err() {
                 return;
@@ -404,6 +538,109 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
         Event::PeerUp(_) | Event::PeerDown(_) | Event::PeerStatus { .. } => {
             let _ = app.emit("lc://peers", serde_json::json!({ "peers": peers_of(&st.node) }));
         }
+        Event::FileOffer {
+            id,
+            from,
+            from_name,
+            to,
+            name,
+            size,
+            ts,
+            mine,
+            members,
+        } => {
+            // hanya file masuk yang perlu dicatat di thread; yang keluar sudah
+            // disimpan oleh command send_file (biar tidak dobel)
+            if mine {
+                return;
+            }
+            let thread_id = from.clone();
+            let _ = members;
+            ensure_thread_for(&st.store, &st.node, &thread_id, "dm", vec![thread_id.clone()]);
+            let msg = StoredMessage {
+                id,
+                thread_id: thread_id.clone(),
+                from_id: from,
+                from_name,
+                body: String::new(),
+                ts,
+                mine: false,
+                delivered: false,
+                attachment: Some(Attachment {
+                    name: name.clone(),
+                    size,
+                    path: String::new(),
+                    sha256: String::new(),
+                    mime: String::new(),
+                }),
+            };
+            let _ = st.store.save_message(&msg);
+            let _ = st.store.bump_unread(&thread_id);
+            let _ = app.emit(
+                "lc://file-offer",
+                serde_json::json!({ "threadId": thread_id, "message": msg, "thread": st.store.thread(&thread_id).ok().flatten() }),
+            );
+        }
+        Event::FileProgress {
+            id,
+            name,
+            sent_bytes,
+            total_bytes,
+            outgoing,
+        } => {
+            let _ = app.emit(
+                "lc://file-progress",
+                serde_json::json!({
+                    "id": id, "name": name, "sentBytes": sent_bytes,
+                    "totalBytes": total_bytes, "outgoing": outgoing
+                }),
+            );
+        }
+        Event::FileReceived {
+            id,
+            from,
+            from_name,
+            to,
+            name,
+            size,
+            path,
+            ts,
+            members,
+        } => {
+            let _ = to;
+            let _ = members;
+            let thread_id = from.clone();
+            // pesan sudah dibuat saat offer; sekarang lengkapi path + sha256
+            let msg = StoredMessage {
+                id,
+                thread_id: thread_id.clone(),
+                from_id: from,
+                from_name,
+                body: String::new(),
+                ts,
+                mine: false,
+                delivered: true,
+                attachment: Some(Attachment {
+                    name: name.clone(),
+                    size,
+                    path: path.clone(),
+                    sha256: lanchat_core::files::sha256_file(std::path::Path::new(&path))
+                        .unwrap_or_default(),
+                    mime: String::new(),
+                }),
+            };
+            let _ = st.store.save_message(&msg);
+            let _ = app.emit(
+                "lc://file-received",
+                serde_json::json!({ "threadId": thread_id, "message": msg }),
+            );
+        }
+        Event::FileFailed { id, name, reason } => {
+            let _ = app.emit(
+                "lc://file-failed",
+                serde_json::json!({ "id": id, "name": name, "reason": reason }),
+            );
+        }
         Event::Warn(w) => {
             let _ = app.emit("lc://warn", serde_json::json!({ "message": w }));
         }
@@ -412,6 +649,8 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let name = std::env::var("LANCHAT_NAME").unwrap_or_else(|_| {
                 std::env::var("USER").unwrap_or_else(|_| "user".into())
@@ -483,7 +722,10 @@ fn main() {
             clear_chat,
             set_status,
             set_setting,
-            peers
+            peers,
+            send_file,
+            send_file_path,
+            open_path
         ])
         .run(tauri::generate_context!())
         .expect("gagal menjalankan app");

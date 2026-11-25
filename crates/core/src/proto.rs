@@ -19,6 +19,10 @@ pub const DEFAULT_APP_PORT: u16 = 41235;
 pub const ANNOUNCE_INTERVAL_SECS: u64 = 5;
 pub const PEER_TTL_SECS: u16 = 16;
 pub const MAX_FRAME: usize = 8 * 1024 * 1024;
+/// Ukuran potongan file mentah (base64 ~1.37x lebih besar, aman di bawah MAX_FRAME).
+pub const FILE_CHUNK_BYTES: usize = 128 * 1024;
+/// Batas ukuran file yang boleh dikirim (biar tidak mengunci memori/disk).
+pub const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Alamat tujuan khusus: broadcast ke semua peer yang terhubung.
 pub const BROADCAST: &str = "*";
@@ -118,6 +122,40 @@ pub enum Frame {
         id: String,
         status: Status,
     },
+    /// Tawaran kirim file. `chunks` = jumlah potongan, `size` = byte total.
+    FileOffer {
+        id: String,
+        from: String,
+        from_name: String,
+        to: String,
+        name: String,
+        size: u64,
+        sha256: String,
+        chunks: u32,
+        ts: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        members: Option<Vec<String>>,
+    },
+    /// Potongan file (base64). Dikirim berurutan setelah offer diterima.
+    FileChunk {
+        id: String,
+        idx: u32,
+        data: String,
+    },
+    /// Konfirmasi atas FileOffer: `accept=true` siap terima, `false` = tolak.
+    FileAccept {
+        id: String,
+        accept: bool,
+        #[serde(default)]
+        reason: String,
+    },
+    /// Terima kasih: file utuh & terverifikasi.
+    FileDone {
+        id: String,
+        ok: bool,
+        #[serde(default)]
+        reason: String,
+    },
 }
 
 pub fn now_ms() -> u64 {
@@ -158,6 +196,42 @@ pub fn room_id(members: &[String]) -> String {
 
 pub fn is_room(target: &str) -> bool {
     target.starts_with('#')
+}
+
+/// Nama file aman: buang komponen path & karakter kontrol, batasi 180 char.
+/// Dipakai sebelum menyentuh filesystem — nama dari jaringan tidak dipercaya.
+pub fn safe_filename(raw: &str) -> String {
+    let base = raw
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("file")
+        .trim()
+        .trim_start_matches('.');
+    let cleaned: String = base
+        .chars()
+        .filter(|c| !c.is_control() && *c != ':' && *c != '*' && *c != '?' && *c != '"' && *c != '<' && *c != '>' && *c != '|')
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        "file".to_string()
+    } else {
+        cleaned.chars().take(180).collect()
+    }
+}
+
+/// `1536` → `"1,5 KB"`. Buat ditampilkan di UI.
+pub fn human_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    let b = bytes as f64;
+    if b < KB {
+        format!("{bytes} B")
+    } else if b < KB * KB {
+        format!("{:.1} KB", b / KB)
+    } else if b < KB * KB * KB {
+        format!("{:.1} MB", b / (KB * KB))
+    } else {
+        format!("{:.2} GB", b / (KB * KB * KB))
+    }
 }
 
 pub async fn write_frame<W>(w: &mut W, f: &Frame) -> Result<()>
@@ -230,6 +304,51 @@ mod tests {
         assert_eq!(room_id(&a), room_id(&b));
         assert!(room_id(&a).starts_with('#'));
         assert_ne!(room_id(&a), room_id(&["aaa".into(), "bbb".into()]));
+    }
+
+    #[test]
+    fn safe_filename_strips_paths_and_traversal() {
+        assert_eq!(safe_filename("../../etc/passwd"), "etc/passwd".rsplit('/').next().unwrap());
+        assert_eq!(safe_filename("/etc/passwd"), "passwd");
+        assert_eq!(safe_filename("C:\\Windows\\x.txt"), "x.txt");
+        assert_eq!(safe_filename("...."), "file");
+        assert_eq!(safe_filename(""), "file");
+        assert_eq!(safe_filename("foto liburan.jpg"), "foto liburan.jpg");
+        assert!(!safe_filename("a\u{0}b.txt").contains('\u{0}'));
+        assert_eq!(safe_filename(&"x".repeat(400)).chars().count(), 180);
+    }
+
+    #[test]
+    fn human_size_formats() {
+        assert_eq!(human_size(512), "512 B");
+        assert_eq!(human_size(1536), "1.5 KB");
+        assert_eq!(human_size(5 * 1024 * 1024), "5.0 MB");
+    }
+
+    #[test]
+    fn file_offer_roundtrip() {
+        let f = Frame::FileOffer {
+            id: "f1".into(),
+            from: "a".into(),
+            from_name: "ray".into(),
+            to: "b".into(),
+            name: "foto.jpg".into(),
+            size: 2048,
+            sha256: "ab".into(),
+            chunks: 2,
+            ts: 1,
+            members: None,
+        };
+        let j = serde_json::to_string(&f).unwrap();
+        assert!(j.contains("\"t\":\"file_offer\""), "{j}");
+        let back: Frame = serde_json::from_str(&j).unwrap();
+        match back {
+            Frame::FileOffer { size, chunks, .. } => {
+                assert_eq!(size, 2048);
+                assert_eq!(chunks, 2);
+            }
+            other => panic!("salah tipe: {other:?}"),
+        }
     }
 
     #[test]

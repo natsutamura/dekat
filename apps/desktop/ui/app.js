@@ -210,13 +210,78 @@ function renderHeader() {
   }
 }
 
+function humanSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
+  return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+function fileIcon(name) {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (["png", "jpg", "jpeg", "gif", "webp", "heic"].includes(ext)) return "🖼";
+  if (["mp4", "mkv", "mov", "webm"].includes(ext)) return "🎬";
+  if (["mp3", "wav", "flac", "ogg", "m4a"].includes(ext)) return "🎵";
+  if (["pdf"].includes(ext)) return "📕";
+  if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) return "🗜";
+  if (["doc", "docx", "txt", "md"].includes(ext)) return "📄";
+  if (["xls", "xlsx", "csv"].includes(ext)) return "📊";
+  if (["apk"].includes(ext)) return "📦";
+  return "📎";
+}
+
+const fileProgress = new Map(); // msgId -> {sentBytes,totalBytes}
+
+function fileCard(m) {
+  const a = m.attachment;
+  const card = h("div", "file-card");
+  card.dataset.msg = m.id;
+  const icon = h("div", "file-icon", fileIcon(a.name));
+  card.appendChild(icon);
+  const meta = h("div", "file-meta");
+  meta.appendChild(h("div", "file-name", a.name));
+  const pr = fileProgress.get(m.id);
+  const sub = h("div", "file-sub");
+  if (pr && pr.totalBytes) {
+    sub.textContent = `${humanSize(pr.sentBytes)} / ${humanSize(pr.totalBytes)}`;
+  } else {
+    sub.textContent = humanSize(a.size) + (a.path ? " · klik untuk buka" : " · menunggu…");
+  }
+  meta.appendChild(sub);
+  const bar = h("div", "file-bar");
+  const fill = h("div", "file-bar-fill");
+  const pct = pr && pr.totalBytes ? Math.min(100, (pr.sentBytes / pr.totalBytes) * 100) : (a.path ? 100 : 0);
+  fill.style.width = pct + "%";
+  bar.appendChild(fill);
+  meta.appendChild(bar);
+  card.appendChild(meta);
+  if (a.path) {
+    const open = h("button", "file-open", "Buka");
+    open.onclick = (e) => {
+      e.stopPropagation();
+      invoke("open_path", { path: a.path }).catch((err) => toast("Gagal buka file", String(err)));
+    };
+    card.appendChild(open);
+  }
+  card.onclick = () => {
+    if (a.path) invoke("open_path", { path: a.path }).catch((err) => toast("Gagal buka file", String(err)));
+    else toast("File belum siap", "Masih menunggu pengiriman selesai");
+  };
+  return card;
+}
+
 function bubbleRow(m, cont, showSender, group) {
   const row = h("div", "row" + (m.mine ? " me" : "") + (cont ? " cont" : ""));
   const stack = h("div", "stack");
   if (showSender && !m.mine && group && !cont) stack.appendChild(h("div", "sender", m.from_name));
-  const b = h("div", "bubble");
-  b.textContent = m.body;
-  stack.appendChild(b);
+  if (m.attachment) {
+    stack.appendChild(fileCard(m));
+  } else {
+    const b = h("div", "bubble");
+    b.textContent = m.body;
+    stack.appendChild(b);
+  }
   row.appendChild(stack);
   if (m.mine && !cont) {
     const meta = h("div", "meta");
@@ -562,6 +627,75 @@ async function wireEvents() {
     renderThreads();
   });
 
+  await listen("lc://file-sent", ({ payload }) => {
+    const arr = S.messages.get(payload.threadId) || [];
+    if (!arr.some((m) => m.id === payload.message.id)) arr.push(payload.message);
+    S.messages.set(payload.threadId, arr);
+    if (S.active === payload.threadId) renderMessages();
+    refreshThreads().catch(() => {});
+  });
+
+  await listen("lc://file-offer", ({ payload }) => {
+    const { threadId, message, thread } = payload;
+    const arr = S.messages.get(threadId) || [];
+    if (!arr.some((m) => m.id === message.id)) arr.push(message);
+    S.messages.set(threadId, arr);
+    if (thread) {
+      const i = S.threads.findIndex((t) => t.id === thread.id);
+      if (i >= 0) S.threads[i] = thread; else S.threads.unshift(thread);
+      S.threads.sort((a, b) => b.last_ts - a.last_ts);
+    }
+    if (S.active === threadId) renderMessages();
+    renderThreads();
+    toast(`📎 ${message.from_name}`, "mengirim " + message.attachment.name);
+  });
+
+  await listen("lc://file-progress", ({ payload }) => {
+    fileProgress.set(payload.id, { sentBytes: payload.sentBytes, totalBytes: payload.totalBytes });
+    document.querySelectorAll(`.file-card[data-msg="${payload.id}"] .file-sub`).forEach((el) => {
+      el.textContent = `${humanSize(payload.sentBytes)} / ${humanSize(payload.totalBytes)}`;
+    });
+    document.querySelectorAll(`.file-card[data-msg="${payload.id}"] .file-bar-fill`).forEach((el) => {
+      const pct = payload.totalBytes ? Math.min(100, (payload.sentBytes / payload.totalBytes) * 100) : 0;
+      el.style.width = pct + "%";
+    });
+  });
+
+  await listen("lc://file-received", ({ payload }) => {
+    const arr = S.messages.get(payload.threadId) || [];
+    const i = arr.findIndex((m) => m.id === payload.message.id);
+    if (i >= 0) arr[i] = payload.message; else arr.push(payload.message);
+    S.messages.set(payload.threadId, arr);
+    fileProgress.delete(payload.message.id);
+    if (S.active === payload.threadId) renderMessages();
+  });
+
+  await listen("lc://file-failed", ({ payload }) => {
+    toast("Transfer gagal", `${payload.name || payload.id}: ${payload.reason}`);
+  });
+
+  // drag & drop file dari OS → kirim ke thread aktif
+  await listen("tauri://drag-drop", async (ev) => {
+    const paths = (ev.payload && ev.payload.paths) || [];
+    if (!paths.length) return;
+    if (!S.active) return toast("Pilih chat dulu", "Jatuhkan file setelah membuka percakapan");
+    const t = S.threads.find((x) => x.id === S.active);
+    if (t && t.kind !== "dm") return toast("Belum bisa", "Kirim file untuk sementara hanya di chat pribadi");
+    for (const path of paths) {
+      try {
+        await invoke("send_file_path", { threadId: S.active, path });
+      } catch (err) {
+        toast("Gagal kirim file", String(err));
+      }
+    }
+  });
+  await listen("tauri://drag-enter", () => {
+    document.getElementById("messages").classList.add("drag-over");
+  });
+  await listen("tauri://drag-leave", () => {
+    document.getElementById("messages").classList.remove("drag-over");
+  });
+
   await listen("lc://warn", ({ payload }) => toast("Info", payload.message));
 }
 
@@ -586,7 +720,17 @@ async function boot() {
   $("search").addEventListener("input", (e) => { S.filter = e.target.value; renderThreads(); renderPeers(); });
   $("btn-new").onclick = newChatModal;
   $("btn-settings").onclick = settingsModal;
-  $("btn-attach").onclick = () => toast("Lampiran", "Kirim file masuk M3 — belum aktif");
+  $("btn-attach").onclick = async () => {
+    if (!S.active) return toast("Pilih chat dulu", "Lampiran hanya bisa dikirim di chat pribadi");
+    const t = S.threads.find((x) => x.id === S.active);
+    if (t && t.kind !== "dm") return toast("Belum bisa", "Kirim file untuk sementara hanya di chat pribadi (DM)");
+    try {
+      const r = await invoke("send_file", { threadId: S.active });
+      if (r === "dibatalkan") return;
+    } catch (err) {
+      toast("Gagal kirim file", String(err));
+    }
+  };
   $("btn-call").onclick = () => toast("Voice call", "Masuk M5 — signalling-nya sudah disiapkan");
   $("btn-info").onclick = () => {
     const t = S.threads.find((x) => x.id === S.active);

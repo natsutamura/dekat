@@ -1,4 +1,4 @@
-# Protokol LAN Chat v2 (M1)
+# Protokol LAN Chat v3 (M1 + M3)
 
 Tanpa server. Semua node setara (peer-to-peer). Angka port ada di `crates/core/src/proto.rs`.
 
@@ -41,6 +41,10 @@ Handshake: **kedua sisi mengirim `hello` segera setelah koneksi terbuka**, lalu 
 {"t":"typing","from":"...","to":"<peer-id>","on":true}
 {"t":"read","from":"...","to":"<peer-id>","up_to_ts":1795...}
 {"t":"presence","id":"...","status":"dnd"}
+{"t":"file_offer","id":"f1","from":"...","from_name":"ray","to":"<peer>","name":"foto.jpg","size":700000,"sha256":"2c96...","chunks":6,"ts":1795...}
+{"t":"file_accept","id":"f1","accept":true,"reason":""}
+{"t":"file_chunk","id":"f1","idx":0,"data":"<base64 128 KiB>"}
+{"t":"file_done","id":"f1","ok":true,"reason":""}
 ```
 
 - `to` = `"*"` → semua koneksi; `#xxxxxxxx` → room/grup; atau node id peer
@@ -72,8 +76,28 @@ langsung (fan-out) ke tiap anggota yang terkoneksi, dengan `to` = room id dan `m
 disertakan untuk verifikasi. Konsekuensi: anggota yang offline saat pesan dikirim tidak
 menerimanya (belum ada store-and-forward — masuk M3).
 
-## 5. Batas M1
+## 5. Transfer file (M3)
+
+Chunk default **128 KiB** byte mentah, di-encode base64 di dalam JSON (≈175 KiB per frame,
+aman di bawah `MAX_FRAME` 8 MiB). Batas file 512 MiB.
+
+Alur:
+
+1. Pengirim: baca file, hitung `sha256` + `chunks`, kirim `file_offer`.
+2. Penerima: buat `<data_dir>/files/<msg_id>-<nama-aman>` lalu balas `file_accept`.
+   Nama file dibersihkan dulu (`safe_filename`): komponen path dibuang, traversal
+   (`../`) tidak bisa keluar folder, karakter kontrol & `:*?"<>|` dibuang, max 180 char.
+3. Pengirim: stream `file_chunk` berurutan (`idx` mulai 0). Penerima **menolak** chunk yang
+   tidak berurutan atau yang membuat ukuran melebihi yang dijanjikan.
+4. Penerima: setelah byte terakhir, verifikasi `sha256`. Kalau beda → **file dihapus** dan
+   `file_done{ok:false}` dikirim ke pengirim.
+5. Pengirim: menunggu `file_done`. Semua langkah punya timeout (30 s) supaya UI tidak
+   menggantung kalau peer diam.
+
+Batas M3: satu file per pesan, penerima harus online, tidak ada resume kalau putus,
+kirim file hanya untuk DM (grup belum).
+
+## 6. Batas M1
 
 Belum ada: TLS, signature per frame, file transfer, store-and-forward untuk anggota grup
 yang offline, dan call. Riwayat sudah persisten di SQLite lokal per perangkat.
-
