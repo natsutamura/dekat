@@ -3,8 +3,8 @@
 Chat P2P di jaringan lokal (tanpa server, tanpa internet) untuk **Windows, Linux, Android**.
 Tampilan mengikuti iMessage: bubble chat, tema dark/light, status online/idle/DND.
 
-Status: **M0 + M1 selesai & teruji**, **M2 (UI desktop) jalan** — app Tauri v2 sudah dibuat,
-chat dua arah antar dua window asli terbukti bekerja (lihat `docs/M1-M2-RESULT.md`).
+Status: **M0–M3 selesai & teruji** — app desktop Tauri v2 (6,7 MB release), chat dua arah,
+grup, kirim file dengan verifikasi sha256. Bukti di `docs/M1-M2-RESULT.md` dan `docs/M3-RESULT.md`.
 
 ## Jalanin app desktop
 

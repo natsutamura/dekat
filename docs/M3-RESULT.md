@@ -62,3 +62,14 @@ Yang terbukti:
 - Preview gambar / thumbnail, paste gambar dari clipboard
 - Batas kecepatan (throttle): saat ini mengirim secepat TCP lokal mengizinkan
 - Beberapa file sekaligus dalam satu pesan
+
+## 5. Build release
+
+```
+cargo build --release -p lanchat-desktop  → EXIT=0
+target/release/lanchat-desktop            → 6.7 MB
+```
+
+Binary **release** (bukan debug) diuji ulang dengan `BIN=target/release/lanchat-desktop
+bash scripts/e2e-file-ui.sh`: file 900.000 byte terkirim lewat dialog GUI asli,
+`sha256 = cd058c7b2feca4b7…` identik di pengirim, penerima, dan file di disk.
