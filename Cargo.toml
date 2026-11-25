@@ -18,6 +18,12 @@ ed25519-dalek = "2"
 hex = "0.4"
 tracing = "0.1"
 
+# Debug build tanpa debug-info penuh: awalnya `target/debug` membengkak 11 GB
+# karena setiap crate menyimpan symbol table lengkap. `line-tables-only` tetap
+# memberi nomor baris di backtrace, tapi jauh lebih kecil.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 opt-level = "z"
 lto = true
