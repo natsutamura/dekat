@@ -84,6 +84,8 @@ pub enum Event {
         ts: u64,
         mine: bool,
         members: Option<Vec<String>>,
+        /// Nama grup (kosong untuk DM/broadcast).
+        room_name: String,
     },
     Ack {
         id: String,
@@ -389,6 +391,7 @@ impl Node {
             ts,
             mine: true,
             members: None,
+            room_name: String::new(),
         });
         Ok(msg_id)
     }
@@ -396,8 +399,27 @@ impl Node {
     /// Kirim pesan ke grup. `members` harus memuat id diri sendiri.
     /// Mengembalikan `(room_id, msg_id)`.
     pub fn send_group(&self, members: &[String], body: &str) -> Result<(String, String)> {
+        self.send_group_named(members, body, "")
+    }
+
+    /// Kirim pesan grup sambil menyertakan nama grup.
+    ///
+    /// Nama ikut di frame karena room id hanya hash dari daftar anggota —
+    /// penerima tidak punya cara lain mengetahui nama yang dipilih pengirim.
+    pub fn send_group_named(
+        &self,
+        members: &[String],
+        body: &str,
+        room_name: &str,
+    ) -> Result<(String, String)> {
         let room = room_id(members);
-        let (msg_id, ts) = self.dispatch(members.to_vec(), room.clone(), body, Some(members.to_vec()))?;
+        let (msg_id, ts) = self.dispatch_named(
+            members.to_vec(),
+            room.clone(),
+            body,
+            Some(members.to_vec()),
+            room_name,
+        )?;
         self.emit(Event::Text {
             id: msg_id.clone(),
             from: self.0.id.clone(),
@@ -407,6 +429,7 @@ impl Node {
             ts,
             mine: true,
             members: Some(members.to_vec()),
+            room_name: room_name.to_string(),
         });
         let _ = ts;
         Ok((room, msg_id))
@@ -729,6 +752,18 @@ impl Node {
         body: &str,
         members: Option<Vec<String>>,
     ) -> Result<(String, u64)> {
+        self.dispatch_named(targets, to_field, body, members, "")
+    }
+
+    /// Sama seperti `dispatch`, tapi menyertakan nama grup di frame.
+    fn dispatch_named(
+        &self,
+        targets: Vec<String>,
+        to_field: String,
+        body: &str,
+        members: Option<Vec<String>>,
+        room_name: &str,
+    ) -> Result<(String, u64)> {
         let msg_id = new_msg_id();
         let ts = now_ms();
         let frame = Frame::Text {
@@ -739,6 +774,7 @@ impl Node {
             ts,
             body: body.to_string(),
             members,
+            room_name: room_name.to_string(),
         };
         let senders: Vec<mpsc::Sender<Frame>> = {
             let conns = self.0.conns.lock().unwrap();
@@ -1189,6 +1225,7 @@ impl Node {
                 ts,
                 body,
                 members,
+                room_name,
             } => {
                 let for_me = to == BROADCAST
                     || to == self.0.id
@@ -1198,7 +1235,7 @@ impl Node {
                             .map(|m| m.iter().any(|x| x == &self.0.id))
                             .unwrap_or(false));
                 if !for_me {
-                    let _ = (id, from, from_name, ts, body, members);
+                    let _ = (id, from, from_name, ts, body, members, room_name);
                     return Ok(());
                 }
                 if from != self.0.id {
@@ -1216,6 +1253,7 @@ impl Node {
                     ts,
                     mine: false,
                     members,
+                    room_name,
                 });
                 let ack = Frame::Ack { id, ts: now_ms() };
                 if let Some(tx) = self.0.conns.lock().unwrap().get(&from).cloned() {

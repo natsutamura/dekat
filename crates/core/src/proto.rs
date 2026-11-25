@@ -135,6 +135,10 @@ pub enum Frame {
         /// diisi kalau pesan group, supaya penerima bisa verifikasi keanggotaan
         #[serde(default, skip_serializing_if = "Option::is_none")]
         members: Option<Vec<String>>,
+        /// Nama grup. Tanpa ini penerima hanya melihat label generik "Grup",
+        /// karena room id deterministik tidak menyimpan nama apa pun.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        room_name: String,
     },
     Ack {
         id: String,
@@ -362,6 +366,7 @@ mod tests {
             ts: 1,
             body: "hai".into(),
             members: None,
+            room_name: String::new(),
         };
         let j = serde_json::to_string(&f).unwrap();
         assert!(j.contains("\"t\":\"text\""), "{j}");

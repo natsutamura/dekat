@@ -265,7 +265,11 @@ fn send(state: State<AppState>, threadId: String, body: String) -> Result<(), St
         .ok_or_else(|| "thread tidak dikenal".to_string())?;
     match t.kind.as_str() {
         "group" => {
-            st.node.send_group(&t.members, &body).map_err(e2s)?;
+            // Sertakan nama grup supaya anggota lain melihat nama yang benar,
+            // bukan label generik.
+            st.node
+                .send_group_named(&t.members, &body, &t.name)
+                .map_err(e2s)?;
         }
         "broadcast" => {
             st.node.send_text(BROADCAST, &body).map_err(e2s)?;
@@ -547,6 +551,36 @@ fn call_end(state: State<AppState>, peerId: String, callId: String, reason: Opti
         .map_err(e2s)
 }
 
+/// Daftarkan AppUserModelID proses ini di Windows.
+///
+/// Toast notification Windows hanya muncul kalau aplikasi punya AUMID yang
+/// dikenal sistem. Installer MSI mendaftarkannya lewat shortcut Start Menu, tapi
+/// versi portable (zip/exe langsung) tidak punya shortcut itu — akibatnya
+/// `show()` sukses tanpa error tapi tidak ada yang tampil. Memanggil ini
+/// membuat Windows memakai identitas aplikasi kita sendiri.
+#[cfg(windows)]
+fn register_aumid() {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    const APP_ID: &str = "id.vuelabs.lanchat";
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SetCurrentProcessExplicitAppUserModelID(app_id: *const u16) -> i32;
+    }
+    let wide: Vec<u16> = OsStr::new(APP_ID)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: pointer berasal dari Vec<u16> yang hidup selama panggilan.
+    let hr = unsafe { SetCurrentProcessExplicitAppUserModelID(wide.as_ptr()) };
+    if hr < 0 {
+        eprintln!("[notify] SetCurrentProcessExplicitAppUserModelID gagal: 0x{hr:08X}");
+    }
+}
+
+#[cfg(not(windows))]
+fn register_aumid() {}
+
 /// Notifikasi native saat pesan masuk dan jendela tidak fokus.
 ///
 /// `request_user_attention` yang membuat tombol taskbar berkedip di Windows
@@ -563,12 +597,18 @@ fn notify_incoming(app: &tauri::AppHandle, msg: &StoredMessage, thread_id: &str)
         msg.body.chars().take(140).collect()
     };
 
-    let _ = app
+    // Error-nya JANGAN ditelan: notifikasi yang gagal tanpa jejak membuat
+    // "popup tidak muncul" mustahil didiagnosis dari sisi user.
+    if let Err(e) = app
         .notification()
         .builder()
         .title(&msg.from_name)
         .body(&body)
-        .show();
+        .show()
+    {
+        eprintln!("[notify] gagal tampilkan notifikasi: {e}");
+        let _ = app.emit("lc://warn", format!("notifikasi gagal: {e}"));
+    }
 
     // Kedipkan entri taskbar (Windows) / minta perhatian WM (Linux).
     if let Some(win) = app.get_webview_window("main") {
@@ -722,13 +762,38 @@ fn ensure_thread_for(
     kind: &str,
     members: Vec<String>,
 ) -> Thread {
-    if let Ok(Some(t)) = store.thread(thread_id) {
+    ensure_thread_named(store, node, thread_id, kind, members, "")
+}
+
+/// Sama seperti `ensure_thread_for`, tapi memakai nama grup dari frame.
+///
+/// Kalau thread sudah ada, namanya diperbarui ketika frame membawa nama baru —
+/// jadi mengganti nama grup di sisi pengirim ikut terlihat di anggota lain.
+fn ensure_thread_named(
+    store: &Store,
+    node: &Node,
+    thread_id: &str,
+    kind: &str,
+    members: Vec<String>,
+    room_name: &str,
+) -> Thread {
+    let from_frame = room_name.trim();
+    if let Ok(Some(mut t)) = store.thread(thread_id) {
+        // Jangan menimpa nama khusus yang sudah ada dengan label generik.
+        if !from_frame.is_empty() && t.name != from_frame {
+            t.name = from_frame.to_string();
+            let _ = store.ensure_thread(&t);
+        }
         return t;
     }
     let t = Thread {
         id: thread_id.to_string(),
         kind: kind.to_string(),
-        name: thread_label(store, node, thread_id),
+        name: if from_frame.is_empty() {
+            thread_label(store, node, thread_id)
+        } else {
+            from_frame.to_string()
+        },
         members,
         last_ts: 0,
         unread: 0,
@@ -750,6 +815,7 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
             ts,
             mine,
             members,
+            room_name,
         } => {
             let (thread_id, kind, mems) = if is_room(&to) {
                 (to.clone(), "group", members.clone().unwrap_or_default())
@@ -760,7 +826,9 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
                 let other = if mine { to.clone() } else { from.clone() };
                 (other.clone(), "dm", vec![other])
             };
-            ensure_thread_for(&st.store, &st.node, &thread_id, kind, mems);
+            // Nama grup ikut disimpan/diperbarui supaya anggota lain tidak
+            // melihat label generik "Grup".
+            ensure_thread_named(&st.store, &st.node, &thread_id, kind, mems, &room_name);
             let msg = StoredMessage {
                 id,
                 thread_id: thread_id.clone(),
@@ -1024,6 +1092,8 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            // Harus dipanggil sebelum notifikasi pertama.
+            register_aumid();
             let name = std::env::var("LANCHAT_NAME").unwrap_or_else(|_| default_name());
             let port: u16 = std::env::var("LANCHAT_PORT")
                 .ok()

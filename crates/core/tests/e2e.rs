@@ -755,3 +755,48 @@ async fn resume_transfer_melanjutkan_dari_posisi_terakhir() {
     let (path, _) = done.expect("transfer harus selesai");
     assert_eq!(lanchat_core::files::sha256_file(&path).unwrap(), sha, "hasil resume harus utuh");
 }
+
+// ---------------- regresi: nama grup & bug grup ----------------
+
+/// Nama grup harus ikut terkirim bersama pesan; tanpa itu anggota lain hanya
+/// melihat label generik "Grup" karena room id tidak menyimpan nama.
+#[tokio::test]
+async fn nama_grup_ikut_terkirim() {
+    let (a, b) = pair().await;
+    let mut ev = b.subscribe();
+
+    let members = vec![a.id().to_string(), b.id().to_string(), "cccccccccccccccc".to_string()];
+    a.send_group_named(&members, "halo", "Warkop Solo").expect("gagal kirim grup");
+
+    let got = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::Text { room_name, body, .. }) = ev.recv().await {
+                break (room_name, body);
+            }
+        }
+    })
+    .await
+    .expect("pesan grup tidak sampai");
+
+    assert_eq!(got.0, "Warkop Solo", "nama grup harus ikut di frame");
+    assert_eq!(got.1, "halo");
+}
+
+/// `send_group` lama (tanpa nama) tetap kompatibel: nama kosong, bukan panik.
+#[tokio::test]
+async fn send_group_tanpa_nama_tetap_jalan() {
+    let (a, b) = pair().await;
+    let mut ev = b.subscribe();
+    let members = vec![a.id().to_string(), b.id().to_string(), "dddddddddddddddd".to_string()];
+    a.send_group(&members, "tes").expect("send_group gagal");
+    let room_name = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::Text { room_name, .. }) = ev.recv().await {
+                break room_name;
+            }
+        }
+    })
+    .await
+    .expect("pesan tidak sampai");
+    assert!(room_name.is_empty(), "tanpa nama, field harus kosong");
+}

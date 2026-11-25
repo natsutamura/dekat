@@ -758,17 +758,23 @@ function settingsModal() {
 
 /* ---------------- modal: chat / grup baru ---------------- */
 function newChatModal() {
-  const known = new Set(S.threads.map((t) => t.id));
-  const avail = S.peers.filter((p) => !known.has(p.id));
+  // Semua peer ditampilkan, termasuk yang sudah punya chat. Menyembunyikan
+  // mereka membuat grup tidak bisa dibuat setelah DM-nya pernah dibuka —
+  // membuka chat kosong pun sudah cukup untuk "menghilangkan" peer dari daftar.
+  const dmWith = new Set(S.threads.filter((t) => t.kind === "dm").map((t) => t.id));
+  const avail = S.peers.slice().sort((a, b) => {
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
   if (!avail.length) {
-    openModal(`<h3>Chat baru</h3><div class="hint">Belum ada peer baru. Pastikan perangkat lain ada di WiFi/LAN yang sama dan aplikasinya terbuka.</div>
+    openModal(`<h3>Chat baru</h3><div class="hint">Belum ada peer. Pastikan perangkat lain ada di WiFi/LAN yang sama dan aplikasinya terbuka.</div>
       <div class="actions"><button class="btn primary" id="nc-close">Oke</button></div>`);
     $("nc-close").onclick = closeModal;
     return;
   }
   openModal(`<h3>Chat / grup baru</h3>
-    <div class="hint" style="margin:0 0 8px">Pilih 1 orang untuk chat pribadi, 2+ untuk grup.</div>
-    <div id="nc-list">${avail.map((p) => `<label class="pick"><input type="checkbox" value="${p.id}"><span class="nm">${p.name}</span><span class="hint" style="margin:0">${p.os}</span></label>`).join("")}</div>
+    <div class="hint" style="margin:0 0 8px">Centang 1 orang untuk chat pribadi, 2+ untuk grup.</div>
+    <div id="nc-list">${avail.map((p) => `<label class="pick${p.online ? "" : " off"}"><input type="checkbox" value="${p.id}"${p.online ? "" : " disabled"}><span class="nm">${escapeAttr(p.name)}</span><span class="hint" style="margin:0">${p.online ? p.os : "offline"}${dmWith.has(p.id) ? " · sudah ada chat" : ""}</span></label>`).join("")}</div>
     <div class="row-line"><span>Nama grup</span><input type="text" id="nc-name" placeholder="mis. Warkop"></div>
     <div class="actions"><button class="btn" id="nc-cancel">Batal</button><button class="btn primary" id="nc-ok">Buat</button></div>`);
   $("nc-cancel").onclick = closeModal;

@@ -76,6 +76,11 @@ tidak terhapus.
 
 ## Kalau notifikasi tidak muncul
 
+Aplikasi sekarang mendaftarkan **AppUserModelID** sendiri saat start
+(`SetCurrentProcessExplicitAppUserModelID`). Ini yang membuat toast muncul bahkan
+pada versi portable yang tidak punya shortcut Start Menu — sebelumnya Windows
+membuang notifikasi tanpa pesan error.
+
 Windows 10 punya **Focus Assist** (azi) yang menahan notifikasi. Cek
 `Settings → System → Focus assist` dan matikan, atau tambahkan LANChat ke pengecualian.
 Notifikasi juga butuh aplikasi punya identitas AppUserModelID; tanpa installer `.msi`
