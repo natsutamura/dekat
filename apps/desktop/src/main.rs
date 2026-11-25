@@ -508,6 +508,77 @@ fn notify_incoming(app: &tauri::AppHandle, msg: &StoredMessage, thread_id: &str)
     }
 }
 
+/// Ambil gambar dari clipboard OS, simpan ke file, kembalikan path-nya.
+///
+/// Kenapa di Rust, bukan lewat event `paste` di webview: WebKitGTK tidak
+/// menyerahkan gambar clipboard sebagai file di `clipboardData`, jadi handler
+/// JavaScript tidak pernah menerima datanya. Membaca langsung dari OS juga
+/// membuat perilakunya sama di Windows dan Linux.
+///
+/// `Ok(None)` = clipboard tidak berisi gambar (biar JS bisa fallback ke paste teks).
+#[tauri::command]
+fn paste_image_from_clipboard(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let mut cb = match arboard::Clipboard::new() {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
+    let img = match cb.get_image() {
+        Ok(i) => i,
+        Err(_) => return Ok(None), // clipboard berisi teks, bukan gambar
+    };
+
+    let dir = state.inner().node.files_dir().join("paste");
+    std::fs::create_dir_all(&dir).map_err(e2s)?;
+
+    // PNG supaya lossless dan bisa langsung ditampilkan inline oleh penerima.
+    let path = dir.join(format!("paste-{}.png", lanchat_core::proto::now_ms()));
+    let file = std::fs::File::create(&path).map_err(e2s)?;
+    let mut buf = std::io::BufWriter::new(file);
+    {
+        let mut enc = png::Encoder::new(&mut buf, img.width as u32, img.height as u32);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut writer = enc.write_header().map_err(e2s)?;
+        writer.write_image_data(&img.bytes).map_err(e2s)?;
+    }
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+/// Simpan gambar dari clipboard (base64) ke file sementara, kembalikan path-nya.
+///
+/// Dipakai untuk paste gambar (Ctrl+V) di kotak pesan: webview memberi data URL,
+/// lalu file itu dikirim lewat jalur file biasa (`send_file_path`).
+#[tauri::command]
+fn save_pasted_image(
+    state: State<'_, AppState>,
+    data_base64: String,
+    ext: Option<String>,
+) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    const MAX: usize = 24 * 1024 * 1024;
+
+    if data_base64.len() > MAX {
+        return Err("gambar terlalu besar (maks 24 MB)".into());
+    }
+    let bytes = B64.decode(data_base64.as_bytes()).map_err(|e| format!("data tidak valid: {e}"))?;
+
+    // Ekstensi ditentukan dari magic bytes, bukan dari nama klaim klien.
+    let ext = match bytes.as_slice() {
+        b if b.starts_with(&[0x89, b'P', b'N', b'G']) => "png",
+        b if b.starts_with(&[0xFF, 0xD8, 0xFF]) => "jpg",
+        b if b.starts_with(b"GIF8") => "gif",
+        b if b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" => "webp",
+        _ => ext.as_deref().unwrap_or("png"),
+    };
+
+    let dir = state.inner().node.files_dir().join("paste");
+    std::fs::create_dir_all(&dir).map_err(e2s)?;
+    let name = format!("paste-{}.{ext}", lanchat_core::proto::now_ms());
+    let path = dir.join(&name);
+    std::fs::write(&path, &bytes).map_err(e2s)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// Baca file gambar lokal → data URL, supaya bisa ditampilkan inline di bubble.
 /// Dibatasi 12 MB: gambar besar lebih baik dibuka lewat tombol "Buka".
 #[tauri::command]
@@ -957,6 +1028,8 @@ fn main() {
             send_file_path,
             open_path,
             read_image,
+            save_pasted_image,
+            paste_image_from_clipboard,
             call_offer,
             call_answer,
             call_ice,

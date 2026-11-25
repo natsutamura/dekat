@@ -866,6 +866,27 @@ async function boot() {
     updateSendState();
     input.focus();
   };
+  // Paste gambar (Ctrl+V): dibaca dari clipboard OS lewat Rust.
+  // Webview tidak menyerahkan gambar clipboard ke JavaScript, jadi jalur ini
+  // harus lewat command. Kalau clipboard berisi teks, biarkan paste normal.
+  input.addEventListener("paste", async (ev) => {
+    const t = S.threads.find((x) => x.id === S.active);
+    if (!t) return; // biar tidak menelan paste teks saat belum ada chat aktif
+    let path = null;
+    try {
+      path = await invoke("paste_image_from_clipboard");
+    } catch (_) {
+      path = null;
+    }
+    if (!path) return; // clipboard bukan gambar → paste teks berjalan seperti biasa
+    ev.preventDefault();
+    try {
+      await invoke("send_file_path", { threadId: t.id, path });
+    } catch (err) {
+      toast("Gagal kirim gambar", String(err));
+    }
+  });
+
   $("btn-emoji").onclick = (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     pop.hidden = !pop.hidden;
