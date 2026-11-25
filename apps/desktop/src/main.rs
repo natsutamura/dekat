@@ -329,6 +329,7 @@ async fn send_file(
                 ts: lanchat_core::proto::now_ms(),
                 mine: true,
                 delivered: true,
+                read: false,
                 attachment: Some(Attachment {
                     name,
                     size,
@@ -389,6 +390,7 @@ async fn send_file_path(
         ts: lanchat_core::proto::now_ms(),
         mine: true,
         delivered: true,
+        read: false,
         attachment: Some(Attachment {
             name,
             size,
@@ -463,6 +465,69 @@ fn call_end(state: State<AppState>, peerId: String, callId: String, reason: Opti
         .node
         .call_end(&peerId, &callId, reason.as_deref().unwrap_or("ditutup"))
         .map_err(e2s)
+}
+
+/// Notifikasi native saat pesan masuk dan jendela tidak fokus.
+///
+/// `request_user_attention` yang membuat tombol taskbar berkedip di Windows
+/// (Critical = kedip terus sampai diklik; Informational = sekali).
+fn notify_incoming(app: &tauri::AppHandle, msg: &StoredMessage, thread_id: &str) {
+    use tauri_plugin_notification::NotificationExt;
+
+    let body = if msg.body.trim().is_empty() {
+        match &msg.attachment {
+            Some(a) => format!("📎 {}", a.name),
+            None => "(kosong)".to_string(),
+        }
+    } else {
+        msg.body.chars().take(140).collect()
+    };
+
+    let _ = app
+        .notification()
+        .builder()
+        .title(&msg.from_name)
+        .body(&body)
+        .show();
+
+    // Kedipkan entri taskbar (Windows) / minta perhatian WM (Linux).
+    if let Some(win) = app.get_webview_window("main") {
+        let focused = win.is_focused().unwrap_or(true);
+        if !focused {
+            let _ = win.request_user_attention(Some(tauri::UserAttentionType::Informational));
+        }
+        // Judul ikut menandai pesan belum dibaca, biar kelihatan di taskbar.
+        let _ = thread_id;
+    }
+}
+
+/// Baca file gambar lokal → data URL, supaya bisa ditampilkan inline di bubble.
+/// Dibatasi 12 MB: gambar besar lebih baik dibuka lewat tombol "Buka".
+#[tauri::command]
+fn read_image(path: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    const MAX: u64 = 12 * 1024 * 1024;
+
+    let p = std::path::Path::new(&path);
+    let meta = std::fs::metadata(p).map_err(|e| format!("tidak bisa baca {}: {e}", p.display()))?;
+    if meta.len() > MAX {
+        return Err("gambar terlalu besar untuk ditampilkan inline".into());
+    }
+    let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
+
+    // Tebak MIME dari magic bytes, bukan dari ekstensi (nama file dari jaringan tidak dipercaya).
+    let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        "image/png"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF8") {
+        "image/gif"
+    } else if bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else {
+        return Err("bukan gambar yang didukung (png/jpg/gif/webp)".into());
+    };
+    Ok(format!("data:{mime};base64,{}", B64.encode(&bytes)))
 }
 
 /// Buka file hasil terimaan pakai aplikasi default OS.
@@ -554,6 +619,7 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
                 ts,
                 mine,
                 delivered: false,
+                read: false,
                 attachment: None,
             };
             if st.store.save_message(&msg).is_err() {
@@ -564,13 +630,19 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
                 let _ = st.store.bump_unread(&thread_id);
             }
             let thread = st.store.thread(&thread_id).ok().flatten();
+            let notify = !mine && !active;
+            if notify {
+                // Notifikasi native + kedipkan taskbar. Ini yang bikin user tahu
+                // ada pesan walau app sedang di belakang.
+                notify_incoming(&app, &msg, &thread_id);
+            }
             let _ = app.emit(
                 "lc://msg",
                 serde_json::json!({
                     "threadId": thread_id,
                     "message": msg,
                     "thread": thread,
-                    "notify": !mine && !active,
+                    "notify": notify,
                 }),
             );
         }
@@ -589,7 +661,7 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
             up_to_ts,
             ..
         } => {
-            let _ = st.store.mark_delivered(&from, up_to_ts);
+            let _ = st.store.mark_receipt_read(&from, up_to_ts);
             let _ = app.emit(
                 "lc://read",
                 serde_json::json!({ "threadId": from, "upToTs": up_to_ts }),
@@ -626,6 +698,7 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
                 ts,
                 mine: false,
                 delivered: false,
+                read: false,
                 attachment: Some(Attachment {
                     name: name.clone(),
                     size,
@@ -679,6 +752,7 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
                 ts,
                 mine: false,
                 delivered: true,
+                read: false,
                 attachment: Some(Attachment {
                     name: name.clone(),
                     size,
@@ -790,6 +864,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let name = std::env::var("LANCHAT_NAME").unwrap_or_else(|_| default_name());
             let port: u16 = std::env::var("LANCHAT_PORT")
@@ -867,6 +942,7 @@ fn main() {
             send_file,
             send_file_path,
             open_path,
+            read_image,
             call_offer,
             call_answer,
             call_ice,

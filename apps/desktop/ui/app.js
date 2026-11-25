@@ -18,7 +18,19 @@ const S = {
 function baseTitle() { return "LAN Chat" + (S.me ? " — " + S.me.name : ""); }
 
 const STATUS_LABEL = { online: "Online", idle: "Idle", dnd: "Do Not Disturb" };
-const EMOJIS = "😀 😁 😂 🤣 😊 😍 😘 😎 🤔 😴 😢 😭 😡 👍 👎 👏 🙏 💪 🔥 ✨ 🎉 ❤️ 💙 💚 💜 🤝 👀 🚀 🍕 ☕ 🌙 ✅ ❌ ⚡ 🧠 💬".split(" ");
+/* Emoji per kategori, bukan satu baris panjang. Dipakai emoji picker. */
+const EMOJI_GROUPS = {
+  "Sering": ["😀","😂","🤣","😊","😍","😘","😎","🤔","😴","😭","😡","🥳","👍","👎","👏","🙏","💪","🤝","👀","🫡"],
+  "Wajah": ["😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃","😉","😊","😇","🥰","😍","🤩","😘","😗","😚","😙","🥲","😋","😛","😜","🤪","😝","🤑","🤗","🤭","🫢","🤫","🤔","🫡","🤐","🤨","😐","😑","😶","🫥","😏","😒","🙄","😬","🤥","😌","😔","😪","🤤","😴","😷","🤒","🤕","🤢","🤮","🥵","🥶","😵","🤯","🤠","🥳","🥺","😢","😭","😱","😖","😣","😞","😓","😩","😫","🥱","😤","😡","😠","🤬","😈","👿","💀"],
+  "Tangan": ["👍","👎","👌","🤌","✌️","🤞","🫰","🤟","🤘","🤙","👈","👉","👆","👇","☝️","👋","🤚","🖐","✋","🖖","🫱","🫲","🫳","🫴","👏","🙌","🫶","👐","🤲","🤝","🙏","💪","🦾"],
+  "Hati": ["❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❣️","💕","💞","💓","💗","💖","💘","💝","💟"],
+  "Alam": ["🔥","✨","⭐","🌟","💫","⚡","☀️","🌤","⛅","🌧","⛈","🌩","❄️","⛄","🌊","🌈","🌸","🌺","🌻","🌹","🍀","🌿","🍁","🌙","🌚","🌞","💧","🌍","🌏","🌕"],
+  "Makan": ["🍕","🍔","🍟","🌭","🍿","🧂","🥐","🍞","🥖","🧀","🥚","🍳","🥞","🍗","🍖","🍜","🍲","🍛","🍣","🍱","🍤","🍙","🍚","🍥","🥟","🍦","🍧","🍨","🍩","🍪","🎂","🍰","🧁","🍫","🍬","🍭","🍮","☕","🍵","🧋","🥤","🍺","🍻","🥂","🍷"],
+  "Aktivitas": ["⚽","🏀","🏈","⚾","🎾","🏐","🏉","🎱","🏓","🏸","🥊","🥋","🎯","🎳","🎮","🕹","🎲","🧩","🎨","🎬","🎤","🎧","🎼","🎹","🥁","🎸","🎺","🎻","🏆","🥇","🥈","🥉","🎉","🎊","🎈","🎁","🎃","🎄"],
+  "Simbol": ["✅","❌","❗","❓","⚠️","🚫","♻️","🔰","💯","🔔","🔕","📌","📍","🔗","📎","💡","🔍","🔒","🔓","🔑","📱","💻","⌨️","🖥","🖨","💾","📀","🎥","📷","📞","☎️","📢","📣","⏰","⌛","📅","📌","✂️","🗑","⚙️","🔧","🔨","🛠","🚗","🚕","🛵","🚲","✈️","🚀","🛸","🏠","🏢","🏫","🚪","🛏","🪑"],
+  "Hewan": ["🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷","🐸","🐵","🐔","🐧","🐦","🦆","🦉","🦇","🐺","🐗","🐴","🦄","🐝","🦋","🐌","🐞","🐢","🐍","🐙","🦑","🦀","🐠","🐟","🐬","🐳","🦈","🐊","🦖"],
+};
+const EMOJIS = EMOJI_GROUPS["Sering"]; // dipakai kalau picker lama dipanggil
 
 /* ---------------- util ---------------- */
 function h(tag, cls, text) {
@@ -76,6 +88,9 @@ function sepLabel(ts) {
 /* ---------------- render ---------------- */
 function applySettings() {
   const s = S.settings;
+  // Tema dipasang di <html>, bukan #app: modal, toast, menu, dan popup panggilan
+  // ditempel ke <body> sehingga tidak mewarisi variabel kalau tema hanya di #app.
+  document.documentElement.dataset.theme = s.theme === "dark" ? "dark" : "light";
   $("app").dataset.theme = s.theme === "dark" ? "dark" : "light";
   const root = document.documentElement.style;
   root.setProperty("--accent", s.accent || "#0b84ff");
@@ -233,6 +248,57 @@ function fileIcon(name) {
 
 const fileProgress = new Map(); // msgId -> {sentBytes,totalBytes}
 
+const imgCache = new Map(); // path -> data URL (biar tidak baca disk berulang)
+
+/// True kalau lampiran ini gambar yang bisa ditampilkan inline.
+function isImageAttachment(a) {
+  if (!a || !a.path) return false;
+  const ext = (a.name.split(".").pop() || "").toLowerCase();
+  return ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
+}
+
+function imageCard(m) {
+  const a = m.attachment;
+  const wrap = h("div", "img-card");
+  wrap.dataset.msg = m.id;
+
+  const cached = imgCache.get(a.path);
+  if (cached) {
+    const img = h("img", "chat-img");
+    img.src = cached;
+    img.alt = a.name;
+    img.onclick = () => openLightbox(cached, a.name);
+    wrap.appendChild(img);
+    return wrap;
+  }
+
+  const ph = h("div", "img-loading", "memuat gambar…");
+  wrap.appendChild(ph);
+  invoke("read_image", { path: a.path })
+    .then((dataUrl) => {
+      imgCache.set(a.path, dataUrl);
+      ph.remove();
+      const img = h("img", "chat-img");
+      img.src = dataUrl;
+      img.alt = a.name;
+      img.onclick = () => openLightbox(dataUrl, a.name);
+      wrap.appendChild(img);
+    })
+    .catch((err) => {
+      ph.textContent = "gambar tidak bisa ditampilkan";
+      ph.title = String(err);
+      wrap.appendChild(fileCard(m)); // fallback ke kartu file biasa
+    });
+  return wrap;
+}
+
+function openLightbox(src, name) {
+  openModal(`<img src="${src}" alt="${name}" style="max-width:100%;border-radius:10px;display:block">
+    <div class="hint" style="margin-top:8px">${name}</div>
+    <div class="actions"><button class="btn primary" id="lb-close">Tutup</button></div>`);
+  $("lb-close").onclick = closeModal;
+}
+
 function fileCard(m) {
   const a = m.attachment;
   const card = h("div", "file-card");
@@ -271,12 +337,20 @@ function fileCard(m) {
   return card;
 }
 
+function tickHtml(m) {
+  // WhatsApp style: satu centang = terkirim, dua abu = sampai ke perangkat,
+  // dua warna bubble = sudah dibaca.
+  if (m.read) return 'Dibaca <span class="tick read">✓✓</span>';
+  if (m.delivered) return 'Terkirim <span class="tick">✓✓</span>';
+  return 'Terkirim <span class="tick">✓</span>';
+}
+
 function bubbleRow(m, cont, showSender, group) {
   const row = h("div", "row" + (m.mine ? " me" : "") + (cont ? " cont" : ""));
   const stack = h("div", "stack");
   if (showSender && !m.mine && group && !cont) stack.appendChild(h("div", "sender", m.from_name));
   if (m.attachment) {
-    stack.appendChild(fileCard(m));
+    stack.appendChild(isImageAttachment(m.attachment) ? imageCard(m) : fileCard(m));
   } else {
     const b = h("div", "bubble");
     b.textContent = m.body;
@@ -286,7 +360,7 @@ function bubbleRow(m, cont, showSender, group) {
   if (m.mine && !cont) {
     const meta = h("div", "meta");
     meta.dataset.for = m.id;
-    meta.innerHTML = m.delivered ? 'Terkirim <span class="tick">✓✓</span>' : 'Terkirim <span class="tick">✓</span>';
+    meta.innerHTML = tickHtml(m);
     row.appendChild(meta);
   }
   return row;
@@ -599,10 +673,10 @@ async function wireEvents() {
 
   await listen("lc://read", ({ payload }) => {
     const arr = S.messages.get(payload.threadId) || [];
-    arr.forEach((m) => { if (m.mine && m.ts <= payload.upToTs) m.delivered = true; });
+    arr.forEach((m) => { if (m.mine && m.ts <= payload.upToTs) { m.delivered = true; m.read = true; } });
     document.querySelectorAll("#messages .meta").forEach((el) => {
       const m = arr.find((x) => x.id === el.dataset.for);
-      if (m && m.delivered) el.innerHTML = 'Terkirim <span class="tick">✓✓</span>';
+      if (m && m.read) el.innerHTML = tickHtml(m);
     });
   });
 
@@ -764,22 +838,39 @@ async function boot() {
     })));
   };
 
-  // emoji
+  // emoji: tab kategori + grid
   const pop = $("emoji-pop");
-  pop.innerHTML = EMOJIS.map((e) => `<button>${e}</button>`).join("");
+  let activeCat = "Sering";
+  function renderEmojiPicker() {
+    pop.innerHTML = `
+      <div class="emoji-tabs">${Object.keys(EMOJI_GROUPS)
+        .map((c) => `<button data-cat="${c}" class="${c === activeCat ? "on" : ""}">${c}</button>`)
+        .join("")}</div>
+      <div class="emoji-grid">${EMOJI_GROUPS[activeCat].map((e) => `<button data-e="${e}">${e}</button>`).join("")}</div>`;
+  }
+  renderEmojiPicker();
   pop.onclick = (e) => {
-    if (e.target.tagName !== "BUTTON") return;
-    input.value += e.target.textContent;
-    pop.hidden = true;
-    input.focus();
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.cat) {
+      activeCat = b.dataset.cat;
+      renderEmojiPicker();
+      return;
+    }
+    if (!b.dataset.e) return;
+    input.value += b.dataset.e;
     autosize();
     updateSendState();
+    input.focus();
   };
   $("btn-emoji").onclick = (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     pop.hidden = !pop.hidden;
-    pop.style.left = Math.min(r.left - 240, window.innerWidth - 300) + "px";
-    pop.style.top = (r.top - 232) + "px";
+    if (pop.hidden) return;
+    // jaga picker tetap di dalam window
+    const w = 340, h = 300;
+    pop.style.left = Math.max(8, Math.min(r.left - w + 40, window.innerWidth - w - 8)) + "px";
+    pop.style.top = Math.max(8, r.top - h - 8) + "px";
   };
 
   // klik di luar menu / emoji

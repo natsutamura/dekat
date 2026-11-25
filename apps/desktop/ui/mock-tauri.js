@@ -44,7 +44,10 @@
     m("m5", "p-adit", "adit (PC)", "udah ada yang nyoba build APK-nya?", now - 12 * min),
     m("m6", "7fda069ad40267af", "ray", "udah, di HP-ku jalan. discovery-nya perlu multicast lock dulu", now - 11 * min, true, true),
     m("m7", "p-dimas", "dimas", "sip, aku bawa proyektor juga biar gampang", now - 6 * min),
-    m("m8", "7fda069ad40267af", "ray", "nanti jam 8 ya, bawa laptop", now - 4 * min, true, false),
+    Object.assign(m("m8", "p-dimas", "dimas", "", now - 8 * min), {
+      attachment: { name: "beeimgtmp-20261124-143936.png", size: 328908, path: "/tmp/foto1.png", sha256: "aa", mime: "" },
+    }),
+    m("m9", "7fda069ad40267af", "ray", "nanti jam 8 ya, bawa laptop", now - 4 * min, true, true),
   ];
   const dmDimas = [
     { id: "d1", thread_id: "p-dimas", from_id: "p-dimas", from_name: "dimas", body: "mockup iMessage-nya udah jadi?", ts: now - 30 * min, mine: false, delivered: false },
@@ -70,6 +73,7 @@
     call_ice: () => null,
     call_end: () => null,
     open_path: () => null,
+    read_image: () => "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAAOklEQVR4nO3BMQEAAADCoPVPbQ0PoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAvg0hAAABmmDh1QAAAABJRU5ErkJggg==",
   };
 
   window.__TAURI__ = {

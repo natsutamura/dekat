@@ -51,10 +51,22 @@ Hapus folder itu = reset total (identitas baru, riwayat hilang).
 
 ## Fitur yang sudah jalan di Windows
 
-- Chat 1:1 dan grup, riwayat lokal, unread, typing, ✓✓
+- Chat 1:1 dan grup, riwayat lokal, unread, typing
+- **Centang dua abu** = terkirim, **centang dua biru** = dibaca
 - Kirim file (tombol lampiran / drag & drop) dengan verifikasi sha256
+- **Gambar tampil langsung di chat** (png/jpg/gif/webp), klik untuk memperbesar
+- **Notifikasi Windows** saat pesan masuk + tombol taskbar berkedip
 - Voice call 1:1 (butuh mikrofon + izin mikrofon Windows)
+- Status Online / Idle / DND (klik status di sidebar)
 - Tema dark/light, zoom `Ctrl +/-/0` dan `Ctrl + scroll`, window resize
+- Emoji picker dengan kategori
+
+## Kalau notifikasi tidak muncul
+
+Windows 10 punya **Focus Assist** (azi) yang menahan notifikasi. Cek
+`Settings → System → Focus assist` dan matikan, atau tambahkan LANChat ke pengecualian.
+Notifikasi juga butuh aplikasi punya identitas AppUserModelID; tanpa installer `.msi`
+Windows kadang menggabungkan notifikasi ke pemilik proses induk.
 
 ## Belum ada
 

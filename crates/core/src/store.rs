@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS messages (
     body       TEXT NOT NULL,
     ts         INTEGER NOT NULL,
     mine       INTEGER NOT NULL DEFAULT 0,
-    delivered  INTEGER NOT NULL DEFAULT 0
+    delivered  INTEGER NOT NULL DEFAULT 0,
+    read       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS messages_thread_ts ON messages(thread_id, ts);
 
@@ -58,6 +59,9 @@ pub struct StoredMessage {
     pub ts: u64,
     pub mine: bool,
     pub delivered: bool,
+    /// Sudah dibaca peer (read receipt). Terpisah dari `delivered`.
+    #[serde(default)]
+    pub read: bool,
     /// Lampiran (kalau ada). Tidak disimpan di tabel messages, di-join dari `attachments`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment: Option<Attachment>,
@@ -102,6 +106,9 @@ impl Store {
             .with_context(|| format!("buka db {}", path.display()))?;
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         db.execute_batch(SCHEMA)?;
+        // Migrasi ringan: DB lama belum punya kolom `read`. ALTER TABLE gagal kalau
+        // kolom sudah ada, jadi error-nya sengaja diabaikan.
+        let _ = db.execute("ALTER TABLE messages ADD COLUMN read INTEGER NOT NULL DEFAULT 0", []);
         Ok(Self { db: Mutex::new(db) })
     }
 
@@ -124,8 +131,8 @@ impl Store {
             )?;
         }
         db.execute(
-            "INSERT OR REPLACE INTO messages (id,thread_id,from_id,from_name,body,ts,mine,delivered)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            "INSERT OR REPLACE INTO messages (id,thread_id,from_id,from_name,body,ts,mine,delivered,read)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![
                 m.id,
                 m.thread_id,
@@ -134,7 +141,8 @@ impl Store {
                 m.body,
                 m.ts as i64,
                 m.mine as i64,
-                m.delivered as i64
+                m.delivered as i64,
+                m.read as i64
             ],
         )?;
         // thread ikut ter-update (preview + waktu terakhir)
@@ -208,20 +216,20 @@ impl Store {
     pub fn messages(&self, thread_id: &str, limit: usize) -> Result<Vec<StoredMessage>> {
         let db = self.db.lock().unwrap();
         let mut st = db.prepare(
-            "SELECT m.id,m.thread_id,m.from_id,m.from_name,m.body,m.ts,m.mine,m.delivered,
+            "SELECT m.id,m.thread_id,m.from_id,m.from_name,m.body,m.ts,m.mine,m.delivered,m.read,
                     a.file_name,a.file_size,a.file_path,a.sha256,a.mime
              FROM messages m LEFT JOIN attachments a ON a.msg_id = m.id
              WHERE m.thread_id=?1 ORDER BY m.ts DESC LIMIT ?2",
         )?;
         let rows = st.query_map(params![thread_id, limit as i64], |r| {
-            let file_name: Option<String> = r.get(8)?;
+            let file_name: Option<String> = r.get(9)?;
             let attachment = match file_name {
                 Some(name) => Some(Attachment {
                     name,
-                    size: r.get::<_, i64>(9)? as u64,
-                    path: r.get(10)?,
-                    sha256: r.get(11)?,
-                    mime: r.get(12)?,
+                    size: r.get::<_, i64>(10)? as u64,
+                    path: r.get(11)?,
+                    sha256: r.get(12)?,
+                    mime: r.get(13)?,
                 }),
                 None => None,
             };
@@ -234,6 +242,7 @@ impl Store {
                 ts: r.get::<_, i64>(5)? as u64,
                 mine: r.get::<_, i64>(6)? != 0,
                 delivered: r.get::<_, i64>(7)? != 0,
+                read: r.get::<_, i64>(8)? != 0,
                 attachment,
             })
         })?;
@@ -285,6 +294,17 @@ impl Store {
         let db = self.db.lock().unwrap();
         db.execute(
             "UPDATE messages SET delivered=1 WHERE thread_id=?1 AND mine=1 AND ts<=?2",
+            params![thread_id, up_to_ts as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Tandai pesan sendiri sudah **dibaca** peer (read receipt).
+    /// Read juga menyiratkan delivered.
+    pub fn mark_receipt_read(&self, thread_id: &str, up_to_ts: u64) -> Result<()> {
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "UPDATE messages SET delivered=1, read=1 WHERE thread_id=?1 AND mine=1 AND ts<=?2",
             params![thread_id, up_to_ts as i64],
         )?;
         Ok(())
@@ -356,6 +376,7 @@ mod tests {
             ts,
             mine,
             delivered: false,
+            read: false,
             attachment: None,
         }
     }
@@ -450,6 +471,33 @@ mod tests {
             db.query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0)).unwrap()
         };
         assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn read_receipt_terpisah_dari_delivered() {
+        let s = Store::open_in_memory().unwrap();
+        s.ensure_thread(&Thread {
+            id: "p3".into(), kind: "dm".into(), name: "peer".into(), members: vec!["p3".into()],
+            last_ts: 0, unread: 0, manual_unread: false, preview: String::new(),
+        }).unwrap();
+        s.save_message(&msg("r1", "p3", 100, true, "satu")).unwrap();
+        s.save_message(&msg("r2", "p3", 200, true, "dua")).unwrap();
+
+        // belum ada apa-apa
+        let m = s.messages("p3", 10).unwrap();
+        assert!(!m[0].delivered && !m[0].read);
+
+        // sampai perangkat peer (ack) -> delivered, belum read
+        s.mark_delivered("p3", 150).unwrap();
+        let m = s.messages("p3", 10).unwrap();
+        assert!(m[0].delivered && !m[0].read, "pesan 1 harus delivered tapi belum read");
+        assert!(!m[1].delivered, "pesan 2 belum tersentuh");
+
+        // dibaca peer -> read (dan delivered)
+        s.mark_receipt_read("p3", 250).unwrap();
+        let m = s.messages("p3", 10).unwrap();
+        assert!(m[0].read && m[0].delivered);
+        assert!(m[1].read && m[1].delivered, "pesan 2 juga sudah dibaca");
     }
 
     #[test]
