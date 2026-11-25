@@ -660,14 +660,13 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
             id,
             from,
             from_name,
-            to,
+            to: _,
             name,
             size,
             path,
             ts,
             members,
         } => {
-            let _ = to;
             let _ = members;
             let thread_id = from.clone();
             // pesan sudah dibuat saat offer; sekarang lengkapi path + sha256
@@ -759,25 +758,47 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
     }
 }
 
+/// Nama default: `LANCHAT_NAME` → USERNAME (Windows) / USER (Unix) → "user".
+fn default_name() -> String {
+    for key in ["USERNAME", "USER"] {
+        if let Ok(v) = std::env::var(key) {
+            if !v.trim().is_empty() {
+                return v;
+            }
+        }
+    }
+    "user".into()
+}
+
+/// Folder data default. Di Windows pakai %APPDATA%\LANChat, di Unix ~/.lanchat.
+fn default_data_dir() -> std::path::PathBuf {
+    if cfg!(windows) {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            return std::path::PathBuf::from(appdata).join("LANChat");
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return std::path::PathBuf::from(home).join(".lanchat");
+    }
+    // fallback terakhir: folder di samping executable
+    std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".lanchat")
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let name = std::env::var("LANCHAT_NAME").unwrap_or_else(|_| {
-                std::env::var("USER").unwrap_or_else(|_| "user".into())
-            });
+            let name = std::env::var("LANCHAT_NAME").unwrap_or_else(|_| default_name());
             let port: u16 = std::env::var("LANCHAT_PORT")
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(lanchat_core::proto::DEFAULT_APP_PORT);
             let dir = std::env::var("LANCHAT_DIR")
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| {
-                    std::env::var("HOME")
-                        .map(|h| std::path::PathBuf::from(h).join(".lanchat"))
-                        .unwrap_or_else(|_| std::path::PathBuf::from("./.lanchat"))
-                });
+                .unwrap_or_else(|_| default_data_dir());
 
             let mut cfg = Config::new(name, dir.clone());
             cfg.port = port;

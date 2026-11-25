@@ -1,0 +1,64 @@
+name: build-windows
+
+# Tauri tidak bisa di-cross-compile dengan andal dari Linux ke Windows (butuh MSVC +
+# WebView2 SDK), jadi .exe dibangun di runner Windows asli.
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "apps/desktop/**"
+      - "crates/**"
+      - ".github/workflows/build-windows.yml"
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Build (release)
+        run: cargo build --release -p lanchat-desktop
+
+      - name: Ukuran binary
+        shell: pwsh
+        run: |
+          $exe = "target/release/lanchat-desktop.exe"
+          if (!(Test-Path $exe)) { throw "binary tidak ditemukan: $exe" }
+          $mb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "ukuran: $mb MB"
+          "UKURAN=$mb MB" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Paketkan zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target/release/lanchat-desktop.exe dist/LANChat.exe
+          Copy-Item README.md dist/README.md
+          Compress-Archive -Path dist/* -DestinationPath LANChat-windows-x64.zip -Force
+          Get-Item LANChat-windows-x64.zip | Select-Object Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LANChat-windows-x64
+          path: LANChat-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Ringkasan
+        shell: pwsh
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY "## LAN Chat untuk Windows"
+          Add-Content $env:GITHUB_STEP_SUMMARY ""
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Binary: ``target/release/lanchat-desktop.exe``"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Ukuran: $env:UKURAN"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Artefak: ``LANChat-windows-x64.zip``"
