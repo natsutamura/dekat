@@ -27,7 +27,7 @@ keduanya cuma konsumen event.
 | **M3** 🟡 | **selesai**: kirim file chunked (128 KiB) + sha256 + progress + tolak chunk rusak/tidak berurutan + drag & drop + CLI `/file` + **gambar tampil inline & lightbox**. **belum**: resume kalau putus, kirim file di grup, paste gambar dari clipboard | kirim file antar perangkat |
 | **M4** | Android: build Tauri mobile, `MulticastLock`, izin `NEARBY_WIFI_DEVICES` (API 33+), notifikasi lokal, foreground service | HP Android chat di LAN yang sama |
 | **M5** 🟡 | **selesai**: WebRTC audio 1:1, signalling lewat frame TCP (`call_offer`/`call_answer`/`call_ice`/`call_end`), popup panggilan masuk, mute, timer, tanpa STUN/TURN. **belum**: group call, device picker, indikator speaking, video | panggilan suara antar perangkat |
-| **M6** | polish: onboarding + pairing QR, pengaturan nama/foto, installer (msi/AppImage/deb), updater, tanda tangan kode | rilis v1.0 |
+| **M6** 🟡 | **selesai**: installer Windows **MSI + NSIS** (AUMID → notifikasi jalan). **belum**: pairing QR, pengaturan nama/foto, AppImage/deb, updater, code signing | rilis v1.0 |
 
 ## Pemetaan fitur yang diminta
 

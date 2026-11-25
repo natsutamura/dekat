@@ -61,6 +61,19 @@ Hapus folder itu = reset total (identitas baru, riwayat hilang).
 - Tema dark/light, zoom `Ctrl +/-/0` dan `Ctrl + scroll`, window resize
 - Emoji picker dengan kategori
 
+## Instalasi (disarankan)
+
+Pakai installer, bukan `.exe` telanjang:
+
+- **`LANChat-en-US.msi`** — install per-mesin (butuh admin). Ini yang membuat
+  **notifikasi Windows berfungsi**, karena Windows butuh AppUserModelID yang hanya
+  terdaftar lewat installer.
+- **`LANChat-setup.exe`** (NSIS) — install per-user, tanpa admin.
+
+Setelah install, app muncul di Start Menu dan bisa di-uninstall dari
+Settings → Apps. Update = jalankan installer baru, data chat di `%APPDATA%\lanchat`
+tidak terhapus.
+
 ## Kalau notifikasi tidak muncul
 
 Windows 10 punya **Focus Assist** (azi) yang menahan notifikasi. Cek
