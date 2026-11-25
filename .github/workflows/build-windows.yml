@@ -1,7 +1,7 @@
 name: build-windows
 
 # Tauri tidak bisa di-cross-compile dengan andal dari Linux ke Windows (butuh MSVC +
-# WebView2 SDK), jadi .exe dibangun di runner Windows asli.
+# WebView2 SDK), jadi installer dibangun di runner Windows asli.
 on:
   push:
     branches: [main, master]
@@ -25,31 +25,39 @@ jobs:
         with:
           workspaces: ". -> target"
 
-      - name: Build (release)
-        run: cargo build --release -p lanchat-desktop
+      # CLI Tauri lewat npm: jauh lebih cepat daripada `cargo install tauri-cli`.
+      - name: Setup Node + Tauri CLI
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install tauri-cli
+        run: npm install -g @tauri-apps/cli@^2
 
-      - name: Ukuran binary
-        shell: pwsh
-        run: |
-          $exe = "target/release/lanchat-desktop.exe"
-          if (!(Test-Path $exe)) { throw "binary tidak ditemukan: $exe" }
-          $mb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
-          Write-Host "ukuran: $mb MB"
-          "UKURAN=$mb MB" | Out-File -FilePath $env:GITHUB_ENV -Append
+      # --bundles msi,nsis: menghasilkan installer, bukan cuma .exe telanjang.
+      # Installer ini penting bukan cuma buat rapi: tanpa instalasi, Windows tidak
+      # punya AppUserModelID untuk aplikasi ini, dan notifikasi toast tidak muncul.
+      - name: Build installer
+        working-directory: apps/desktop
+        run: tauri build --bundles msi,nsis --verbose
 
-      # Artifact GitHub otomatis dibungkus zip; jangan di-zip lagi (jadi zip dalam zip).
-      - name: Siapkan nama file
+      - name: Kumpulkan artefak
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item target/release/lanchat-desktop.exe dist/LANChat.exe
-          Copy-Item README.md dist/README.md
+          $msi = Get-ChildItem -Recurse -Filter *.msi target | Select-Object -First 1
+          $nsis = Get-ChildItem -Recurse -Filter *-setup.exe target | Select-Object -First 1
+          if (-not $msi) { throw "MSI tidak dihasilkan" }
+          Copy-Item $msi.FullName "dist/LANChat-$($msi.Name -replace '.*_','')"
+          if ($nsis) { Copy-Item $nsis.FullName "dist/LANChat-setup.exe" }
+          Copy-Item ../../README.md dist/README.md
           Get-ChildItem dist | Select-Object Name, Length
+          $mb = [math]::Round($msi.Length / 1MB, 2)
+          "UKURAN_MSI=$mb MB" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LANChat-windows-x64
+          name: LANChat-windows-installer
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -59,6 +67,5 @@ jobs:
         run: |
           Add-Content $env:GITHUB_STEP_SUMMARY "## LAN Chat untuk Windows"
           Add-Content $env:GITHUB_STEP_SUMMARY ""
-          Add-Content $env:GITHUB_STEP_SUMMARY "- Binary: ``target/release/lanchat-desktop.exe``"
-          Add-Content $env:GITHUB_STEP_SUMMARY "- Ukuran: $env:UKURAN"
-          Add-Content $env:GITHUB_STEP_SUMMARY "- Artefak: ``LANChat-windows-x64`` (berisi LANChat.exe)"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Installer MSI: $env:UKURAN_MSI"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Artefak: ``LANChat-windows-installer``"
