@@ -144,6 +144,8 @@ pub enum Event {
         from: String,
         from_name: String,
         sdp: String,
+        /// Peserta panggilan (termasuk pemanggil + diri sendiri). >2 = grup.
+        members: Vec<String>,
     },
     /// Peer menerima ajakan kita, bawa SDP answer.
     CallAccepted {
@@ -529,6 +531,20 @@ impl Node {
 
     /// Kirim ajakan voice call (SDP offer) ke satu peer.
     pub fn call_offer(&self, to: &str, call_id: &str, sdp: &str) -> Result<()> {
+        self.call_offer_group(to, call_id, sdp, &[])
+    }
+
+    /// Sama seperti [`Node::call_offer`], tapi menyertakan daftar peserta grup.
+    ///
+    /// `members` kosong = panggilan 1:1. Penerima memakai daftar ini untuk
+    /// menyambung ke peserta lain (mesh), bukan cuma ke pemanggil.
+    pub fn call_offer_group(
+        &self,
+        to: &str,
+        call_id: &str,
+        sdp: &str,
+        members: &[String],
+    ) -> Result<()> {
         self.send_to(
             to,
             Frame::CallOffer {
@@ -538,6 +554,7 @@ impl Node {
                 to: to.to_string(),
                 sdp: sdp.to_string(),
                 ts: now_ms(),
+                members: members.to_vec(),
             },
         )
     }
@@ -1150,6 +1167,7 @@ impl Node {
                 from,
                 from_name,
                 sdp,
+                members,
                 ..
             } => {
                 self.emit(Event::CallIncoming {
@@ -1157,6 +1175,7 @@ impl Node {
                     from,
                     from_name,
                     sdp,
+                    members,
                 });
             }
             Frame::CallAnswer {

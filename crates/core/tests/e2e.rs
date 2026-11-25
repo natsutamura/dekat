@@ -499,3 +499,99 @@ async fn tanda_tangan_tidak_bisa_dipakai_ulang_di_sesi_lain() {
     let _ = std::fs::remove_dir_all(&dir_a);
     let _ = std::fs::remove_dir_all(&dir_b);
 }
+
+// ---------------- panggilan grup (mesh) ----------------
+
+/// Roster grup harus sampai ke peserta, dan tiap penerima tahu siapa saja pesertanya.
+/// Ini yang dipakai UI untuk membangun mesh (sambung ke semua peserta, bukan cuma pemanggil).
+#[tokio::test]
+async fn call_grup_membawa_roster_peserta() {
+    let (a, b) = pair().await;
+    let mut ev = b.subscribe();
+
+    let members = vec![a.id().to_string(), b.id().to_string(), "cccccccccccccccc".to_string()];
+    a.call_offer_group(b.id(), "call-1", "v=0\r\nsdp-offer", &members)
+        .expect("gagal kirim offer grup");
+
+    let got = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::CallIncoming { call_id, from, members, sdp, .. }) = ev.recv().await {
+                break Some((call_id, from, members, sdp));
+            }
+        }
+    })
+    .await
+    .expect("tidak ada CallIncoming")
+    .expect("event lain");
+
+    assert_eq!(got.0, "call-1");
+    assert_eq!(got.1, a.id());
+    assert_eq!(got.2, members, "roster peserta harus diteruskan apa adanya");
+    assert_eq!(got.3, "v=0\r\nsdp-offer");
+
+    // Panggilan 1:1 tetap jalan, roster kosong = bukan grup.
+    let mut ev2 = b.subscribe();
+    a.call_offer(b.id(), "call-2", "sdp-dm").unwrap();
+    let one = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::CallIncoming { members, .. }) = ev2.recv().await {
+                break members;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(one.is_empty(), "panggilan DM tidak boleh membawa roster");
+}
+
+/// Mesh 3 node: A memanggil B dan C. Setelah keduanya menerima, B→C harus bisa
+/// tersambung langsung. Diuji di level signalling: frame offer B→C diterima C.
+#[tokio::test]
+async fn mesh_tiga_node_saling_terhubung() {
+    let a = Node::start(cfg("a")).await.unwrap();
+    let b = Node::start(cfg("b")).await.unwrap();
+    let c = Node::start(cfg("c")).await.unwrap();
+
+    // Sambungkan semua lewat transport chat.
+    for (x, y) in [(&a, &b), (&a, &c), (&b, &c)] {
+        // x yang mendial y (bukan sebaliknya — dial ke port sendiri akan ditolak).
+        let x2 = x.clone();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), y.port());
+        tokio::spawn(async move { let _ = x2.connect_peer(addr).await; });
+    }
+    for _ in 0..80 {
+        if a.is_connected(b.id()) && a.is_connected(c.id()) && b.is_connected(c.id()) { break }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(b.is_connected(c.id()), "transport B↔C belum siap");
+
+    // A memanggil grup berisi A, B, C.
+    let members = vec![a.id().to_string(), b.id().to_string(), c.id().to_string()];
+    let mut ev_c = c.subscribe();
+    let mut ev_b = b.subscribe();
+    a.call_offer_group(b.id(), "g-1", "offer-dari-a", &members).unwrap();
+    a.call_offer_group(c.id(), "g-1", "offer-dari-a", &members).unwrap();
+
+    // B dan C menerima undangan beserta roster.
+    for (name, ev) in [("b", &mut ev_b), ("c", &mut ev_c)] {
+        let m = timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(Event::CallIncoming { members, .. }) = ev.recv().await { break members }
+            }
+        }).await.unwrap_or_else(|_| panic!("{name} tidak menerima undangan"));
+        assert_eq!(m.len(), 3, "{name} harus tahu ada 3 peserta");
+    }
+
+    // Sekarang B menghubungi C langsung (langkah mesh yang dilakukan UI).
+    // C harus menerima offer dari B — inilah koneksi peer-to-peer tambahannya.
+    let mut ev_c2 = c.subscribe();
+    b.call_offer_group(c.id(), "g-1", "offer-dari-b", &members).unwrap();
+    let from_b = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(Event::CallIncoming { from, sdp, .. }) = ev_c2.recv().await { break (from, sdp) }
+        }
+    }).await.expect("C tidak menerima offer mesh dari B");
+
+    assert_eq!(from_b.0, b.id(), "offer mesh harus datang dari B");
+    assert_eq!(from_b.1, "offer-dari-b");
+}

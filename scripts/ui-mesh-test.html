@@ -1,0 +1,50 @@
+<!doctype html><meta charset="utf-8"><title>mesh-test</title>
+<div class="panel" style="position:relative;height:400px"></div>
+<script>
+// --- stub Tauri: catat panggilan command, izinkan memicu event ---
+const calls = [];
+const listeners = {};
+window.__calls = calls;
+window.__emit = (ev, payload) => (listeners[ev] || []).forEach((cb) => cb({ payload }));
+window.__TAURI__ = {
+  core: { invoke: async (cmd, args) => {
+    calls.push([cmd, args]);
+    if (cmd === "me") return { id: window.__selfId };
+    return null;
+  }},
+  event: { listen: async (ev, cb) => { (listeners[ev] = listeners[ev] || []).push(cb); return () => {}; } },
+};
+
+// --- stub WebRTC: cukup merekam, tidak perlu audio nyata ---
+let pcSeq = 0;
+window.__pcs = [];
+class FakePC {
+  constructor() { this.id = ++pcSeq; this.iceGatheringState = "complete";
+    this.signalingState = "stable"; this.remoteDescription = null; this.connectionState = "new";
+    this.tracks = []; window.__pcs.push(this); }
+  addTrack(t) { this.tracks.push(t); }
+  async createOffer() { return { type: "offer", sdp: "offer-" + this.id }; }
+  async createAnswer() { return { type: "answer", sdp: "answer-" + this.id }; }
+  async setLocalDescription(d) { this.localDescription = d; this.signalingState = "have-local-offer"; }
+  async setRemoteDescription(d) { this.remoteDescription = d; this.signalingState = "stable"; }
+  addIceCandidate() { return Promise.resolve(); }
+  close() { this.connectionState = "closed"; }
+  addEventListener() {}
+  removeEventListener() {}
+}
+window.RTCPeerConnection = FakePC;
+window.MediaStream = class { constructor(t) { this.t = t || []; } getTracks() { return this.t; } getAudioTracks() { return this.t; } };
+Object.defineProperty(navigator, "mediaDevices", {
+  configurable: true,
+  value: { getUserMedia: async () => new MediaStream([{ kind: "audio", enabled: true, stop() {} }]) },
+});
+</script>
+<script src="../apps/desktop/ui/call.js"></script>
+<script>
+window.__ready = false;
+(async () => {
+  window.LanChatCall.setNameResolver((id) => "nama-" + id);
+  await window.LanChatCall.init();
+  window.__ready = true;
+})();
+</script>

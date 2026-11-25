@@ -807,11 +807,14 @@ async function boot() {
   };
   $("btn-call").onclick = () => {
     const t = S.threads.find((x) => x.id === S.active);
-    if (!t) return toast("Pilih chat dulu", "Panggilan hanya untuk chat pribadi");
-    if (t.kind !== "dm") return toast("Belum bisa", "Panggilan grup masuk M5-lanjut");
-    const p = S.peers.find((x) => x.id === t.id);
-    if (p && !p.online) return toast("Peer offline", "Tidak bisa memanggil peer yang tidak online");
-    window.LanChatCall.startCall(t.id, t.name);
+    if (!t) return toast("Pilih chat dulu", "Panggilan butuh percakapan aktif");
+
+    // Peserta = anggota thread yang sedang online.
+    const ids = t.kind === "dm" ? [t.id] : t.members && t.members.length ? t.members : [t.id];
+    const online = ids.filter((id) => S.peers.some((p) => p.id === id && p.online));
+    if (!online.length) return toast("Tidak ada yang online", "Peer harus online untuk dipanggil");
+
+    window.LanChatCall.startCall(online, t.name);
   };
   $("btn-info").onclick = () => {
     const t = S.threads.find((x) => x.id === S.active);
@@ -899,7 +902,13 @@ async function boot() {
   window.addEventListener("focus", () => { document.title = baseTitle(); });
 
   // voice call
-  if (window.LanChatCall) await window.LanChatCall.init();
+  if (window.LanChatCall) {
+    // Beri call.js cara menerjemahkan peer id → nama tampilan.
+    window.LanChatCall.setNameResolver(
+      (id) => (S.peers.find((p) => p.id === id) || {}).name || String(id).slice(0, 6)
+    );
+    await window.LanChatCall.init();
+  }
 
   // buka thread terakhir kalau ada
   if (S.threads.length) openThread(S.threads[0].id);

@@ -413,10 +413,17 @@ async fn send_file_path(
 
 #[tauri::command]
 #[allow(non_snake_case)]
-fn call_offer(state: State<AppState>, peerId: String, callId: String, sdp: String) -> Result<(), String> {
+fn call_offer(
+    state: State<AppState>,
+    peerId: String,
+    callId: String,
+    sdp: String,
+    members: Option<Vec<String>>,
+) -> Result<(), String> {
+    let members = members.unwrap_or_default();
     state
         .node
-        .call_offer(&peerId, &callId, &sdp)
+        .call_offer_group(&peerId, &callId, &sdp, &members)
         .map_err(e2s)
 }
 
@@ -779,10 +786,14 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
             from,
             from_name,
             sdp,
+            members,
         } => {
             let _ = app.emit(
                 "lc://call-incoming",
-                serde_json::json!({ "callId": call_id, "from": from, "fromName": from_name, "sdp": sdp }),
+                serde_json::json!({
+                    "callId": call_id, "from": from, "fromName": from_name,
+                    "sdp": sdp, "members": members,
+                }),
             );
         }
         Event::CallAccepted { call_id, from, sdp } => {

@@ -47,6 +47,7 @@ Frame = `u32 BE length` + JSON body. Batas 8 MiB. Panjang di luar `1..=8 MiB` �
 ```json
 {"Hello":{"v":3,"id":"7fda069ad40267af","name":"ray","fp":"ray#7fda","port":42001,"os":"linux","status":"online","sig":"","pk":""}}
 {"Auth":{"pk":"<64 hex>","sig":"<128 hex>"}}
+{"CallOffer":{"call_id":"c-1a2b","from":"...","from_name":"ray","to":"...","sdp":"v=0...","ts":...,"members":["id-a","id-b","id-c"]}}
 {"Text":{"id":"4ba15ab0c1d2e3f4","from":"...","from_name":"ray","to":"*","ts":1795...,"body":"halo"}}
 ```
 
@@ -169,3 +170,29 @@ Detail penting:
 
 Belum ada: TLS, signature per frame, file transfer, store-and-forward untuk anggota grup
 yang offline, dan call. Riwayat sudah persisten di SQLite lokal per perangkat.
+## 6. Panggilan suara (WebRTC mesh)
+
+Rust hanya meneruskan SDP + ICE lewat frame `CallOffer`/`CallAnswer`/`CallIce`/`CallEnd`.
+Audio mengalir langsung peer-to-peer; tidak ada STUN/TURN karena semua peserta satu subnet.
+
+### Panggilan grup
+
+`CallOffer.members` berisi seluruh peserta (termasuk pemanggil). Isi kosong = panggilan 1:1.
+
+Aturan pembentukan **mesh penuh** (tiap peserta terhubung langsung ke tiap peserta lain):
+
+1. Pemanggil mengirim `CallOffer` ke **semua** peserta.
+2. Setelah menerima, tiap peserta menjawab pemanggil (`CallAnswer`), lalu mengirim
+   `CallOffer` sendiri ke peserta lain yang **id-nya lebih besar** dari dirinya.
+3. Karena aturan langkah 2 hanya ke arah id lebih besar, tiap pasangan menghasilkan
+   **tepat satu** koneksi — tidak ada koneksi dobel.
+
+Beban bandwidth naik kuadratik: untuk N peserta, tiap perangkat mengirim suaranya N−1 kali.
+Praktis nyaman sampai ~5–6 peserta; di atas itu perlu SFU (di luar cakupan, karena tanpa server).
+
+### Batas
+
+- Satu perangkat hanya boleh berada di satu panggilan pada satu waktu. Undangan yang datang
+  saat sedang menelepon dijawab `accept=false` dengan alasan `sedang dalam panggilan lain`.
+- Belum ada video, device picker, dan indikator siapa yang sedang bicara.
+- Satu peserta keluar tidak mengakhiri panggilan grup; koneksinya saja yang ditutup.

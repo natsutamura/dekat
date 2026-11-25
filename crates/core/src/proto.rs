@@ -186,6 +186,13 @@ pub enum Frame {
         /// SDP offer WebRTC (audio saja)
         sdp: String,
         ts: u64,
+        /// Daftar peserta panggilan (termasuk pemanggil). Kosong = panggilan 1:1.
+        ///
+        /// Penerima memakai ini untuk membangun **mesh**: setelah menerima, ia
+        /// memanggil peserta lain yang id-nya lebih besar, sehingga tiap pasangan
+        /// punya tepat satu koneksi (aturan dial yang sama dengan transport utama).
+        #[serde(default)]
+        members: Vec<String>,
     },
     /// Jawaban atas [`Frame::CallOffer`]. `accept=false` → panggilan ditolak.
     CallAnswer {
