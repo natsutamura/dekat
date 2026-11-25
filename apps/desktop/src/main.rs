@@ -30,6 +30,8 @@ struct Me {
     fp: String,
     port: u16,
     status: String,
+    /// Avatar sendiri sebagai data URL, siap dipakai di `<img src>`.
+    avatar: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -41,6 +43,7 @@ struct PeerDto {
     addr: String,
     status: String,
     online: bool,
+    avatar: Option<String>,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -86,6 +89,9 @@ fn peers_of(node: &Node) -> Vec<PeerDto> {
             addr: p.addr.to_string(),
             status: p.status.as_str().to_string(),
             online: p.online,
+            avatar: p.avatar.map(|a| {
+                if a.is_empty() { String::new() } else { format!("data:image/png;base64,{a}") }
+            }),
         })
         .collect()
 }
@@ -97,7 +103,49 @@ fn me_of(node: &Node) -> Me {
         fp: node.fp().to_string(),
         port: node.port(),
         status: node.status().as_str().to_string(),
+        avatar: node
+            .avatar()
+            .filter(|a| !a.is_empty())
+            .map(|a| format!("data:image/png;base64,{a}")),
     }
+}
+
+/// Ganti nama tampilan (bukan nama PC). Berlaku langsung ke semua peer.
+#[tauri::command]
+fn set_display_name(state: State<AppState>, name: String) -> Result<Me, String> {
+    state
+        .node
+        .set_profile(Some(&name), None)
+        .map_err(e2s)?;
+    Ok(me_of(&state.node))
+}
+
+/// Pasang avatar dari PNG base64 yang sudah diperkecil di klien.
+#[tauri::command]
+fn set_my_avatar(state: State<AppState>, dataBase64: String) -> Result<Me, String> {
+    const MAX: usize = 512 * 1024; // 512 KB cukup untuk 128x128 PNG
+    if dataBase64.len() > MAX {
+        return Err("avatar terlalu besar (maks 512 KB setelah diperkecil)".into());
+    }
+    let raw = dataBase64.rsplit(',').next().unwrap_or("").to_string();
+    if raw.is_empty() {
+        return Err("data avatar kosong".into());
+    }
+    state
+        .node
+        .set_profile(None, Some(raw))
+        .map_err(e2s)?;
+    Ok(me_of(&state.node))
+}
+
+/// Hapus avatar, kembali ke inisial nama.
+#[tauri::command]
+fn clear_my_avatar(state: State<AppState>) -> Result<Me, String> {
+    state
+        .node
+        .set_profile(None, Some(String::new()))
+        .map_err(e2s)?;
+    Ok(me_of(&state.node))
 }
 
 #[tauri::command]
@@ -745,7 +793,10 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
                 serde_json::json!({ "threadId": from, "upToTs": up_to_ts }),
             );
         }
-        Event::PeerUp(_) | Event::PeerDown(_) | Event::PeerStatus { .. } => {
+        Event::PeerUp(_)
+        | Event::PeerDown(_)
+        | Event::PeerStatus { .. }
+        | Event::PeerProfile { .. } => {
             let _ = app.emit("lc://peers", serde_json::json!({ "peers": peers_of(&st.node) }));
         }
         Event::FileOffer {
@@ -1022,6 +1073,9 @@ fn main() {
             set_unread,
             clear_chat,
             set_status,
+            set_display_name,
+            set_my_avatar,
+            clear_my_avatar,
             set_setting,
             peers,
             send_file,

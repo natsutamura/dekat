@@ -595,3 +595,76 @@ async fn mesh_tiga_node_saling_terhubung() {
     assert_eq!(from_b.0, b.id(), "offer mesh harus datang dari B");
     assert_eq!(from_b.1, "offer-dari-b");
 }
+
+// ---------------- profil (nama kustom + avatar) ----------------
+
+/// Nama tampilan bisa diganti dan peer lain menerimanya lewat frame Profile.
+#[tokio::test]
+async fn nama_profil_berubah_dan_sampai_ke_peer() {
+    let (a, b) = pair().await;
+    let mut ev = b.subscribe();
+
+    a.set_profile(Some("Ray Ganteng"), None).expect("gagal set nama");
+    assert_eq!(a.name(), "Ray Ganteng", "nama sendiri harus langsung berubah");
+
+    // Frame Profile dikirim lewat kanal writer, jadi tunggu sampai sampai di B.
+    let mut nama_b = String::new();
+    for _ in 0..60 {
+        if let Some(p) = b.peers().into_iter().find(|p| p.id == a.id()) {
+            nama_b = p.name.clone();
+            if nama_b == "Ray Ganteng" { break }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(nama_b, "Ray Ganteng", "peer B tidak menerima nama baru");
+    let _ = ev.recv().await; // event apa pun, yang penting tidak panik
+}
+
+/// Avatar ikut terkirim dan tersimpan di sisi peer.
+#[tokio::test]
+async fn avatar_profil_sampai_ke_peer() {
+    let (a, b) = pair().await;
+    // PNG 1x1 transparan
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+    a.set_profile(None, Some(PNG.to_string())).expect("gagal set avatar");
+
+    let mut ok = false;
+    for _ in 0..60 {
+        if let Some(p) = b.peers().into_iter().find(|p| p.id == a.id()) {
+            if p.avatar.as_deref() == Some(PNG) { ok = true; break }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(ok, "avatar tidak sampai ke peer B");
+    assert_eq!(a.avatar().as_deref(), Some(PNG), "avatar sendiri harus tersimpan");
+}
+
+/// Nama kosong/terlalu panjang ditolak, dan nama lama tidak berubah.
+#[tokio::test]
+async fn nama_profil_tidak_valid_ditolak() {
+    let (a, _b) = pair().await;
+    let asli = a.name();
+    assert!(a.set_profile(Some("   "), None).is_err(), "nama kosong harus ditolak");
+    assert_eq!(a.name(), asli, "nama tidak boleh berubah saat input ditolak");
+    let panjang = "x".repeat(40);
+    assert!(a.set_profile(Some(&panjang), None).is_err(), "nama 40 char harus ditolak");
+}
+
+/// Profil bertahan setelah node di-restart (disimpan di profile.json).
+#[tokio::test]
+async fn profil_bertahan_setelah_restart() {
+    let dir = tmp_dir("profil");
+    let mut cfg = Config::new("awal", &dir);
+    cfg.port = 0;
+    cfg.discovery = false;
+
+    let n = Node::start(cfg.clone()).await.unwrap();
+    n.set_profile(Some("Nama Baru"), None).unwrap();
+    let id1 = n.id().to_string();
+    drop(n);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let n2 = Node::start(cfg).await.unwrap();
+    assert_eq!(n2.id(), id1, "id harus tetap sama setelah restart");
+    assert_eq!(n2.name(), "Nama Baru", "nama kustom harus bertahan");
+}

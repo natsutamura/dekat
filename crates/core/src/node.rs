@@ -67,6 +67,8 @@ pub struct Peer {
     /// Identitas peer sudah dibuktikan lewat tanda tangan di atas sesi TLS.
     /// `false` = peer lama (plaintext) yang diterima karena `allow_plaintext`.
     pub verified: bool,
+    /// Avatar PNG base64 dari frame `Profile`, kalau peer mengirimnya.
+    pub avatar: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -100,6 +102,12 @@ pub enum Event {
     PeerStatus {
         id: String,
         status: Status,
+    },
+    /// Profil peer berubah (nama dan/atau avatar).
+    PeerProfile {
+        id: String,
+        name: String,
+        avatar: Option<String>,
     },
     /// File ditawarkan (masuk). `accepted=false` berarti kita menolak.
     FileOffer {
@@ -174,10 +182,18 @@ pub enum Event {
     Warn(String),
 }
 
-struct Inner {
-    id: String,
+/// Profil yang bisa diubah user saat aplikasi berjalan.
+struct MyProfile {
     name: String,
     fp: String,
+    /// Avatar PNG base64 (tanpa prefix data URL), sudah diperkecil di klien.
+    avatar: Option<String>,
+}
+
+struct Inner {
+    id: String,
+    data_dir: PathBuf,
+    profile: Mutex<MyProfile>,
     port: u16,
     announce: Arc<Mutex<Announce>>,
     peers: Mutex<HashMap<String, Peer>>,
@@ -194,6 +210,42 @@ struct Inner {
     allow_plaintext: bool,
 }
 
+impl MyProfile {
+    /// Muat `profile.json`; kalau belum ada, pakai nama dari config.
+    fn load(dir: &Path, identity: &Identity) -> Self {
+        let path = dir.join("profile.json");
+        if let Ok(raw) = std::fs::read_to_string(&path) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                let name = v
+                    .get("name")
+                    .and_then(|x| x.as_str())
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or(&identity.name)
+                    .to_string();
+                let avatar = v
+                    .get("avatar")
+                    .and_then(|x| x.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+                let fp = format!("{}#{}", name, &identity.id()[..4]);
+                return Self { name, fp, avatar };
+            }
+        }
+        let name = identity.name.clone();
+        let fp = identity.fp();
+        Self { name, fp, avatar: None }
+    }
+
+    fn save(&self, dir: &Path) -> Result<()> {
+        let v = serde_json::json!({
+            "name": self.name,
+            "avatar": self.avatar.clone().unwrap_or_default(),
+        });
+        std::fs::write(dir.join("profile.json"), serde_json::to_vec_pretty(&v)?)?;
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub struct Node(Arc<Inner>);
 
@@ -205,11 +257,14 @@ impl Node {
             .with_context(|| format!("bind TCP port {}", cfg.port))?;
         let port = listener.local_addr()?.port();
 
+        // Profil user (nama + avatar) disimpan terpisah dari identitas: kunci
+        // Ed25519 tidak berubah, tapi nama tampilan boleh diganti kapan saja.
+        let profile = MyProfile::load(&cfg.data_dir, &identity);
         let announce = Arc::new(Mutex::new(Announce {
             v: PROTO_VERSION,
             id: identity.id(),
-            name: identity.name.clone(),
-            fp: identity.fp(),
+            name: profile.name.clone(),
+            fp: profile.fp.clone(),
             os: std::env::consts::OS.to_string(),
             port,
             status: Status::Online,
@@ -221,8 +276,8 @@ impl Node {
         let (events, _) = broadcast::channel(512);
         let node = Node(Arc::new(Inner {
             id: identity.id(),
-            name: identity.name.clone(),
-            fp: identity.fp(),
+            data_dir: cfg.data_dir.clone(),
+            profile: Mutex::new(profile),
             port,
             announce: announce.clone(),
             peers: Mutex::new(HashMap::new()),
@@ -251,12 +306,17 @@ impl Node {
         &self.0.id
     }
 
-    pub fn name(&self) -> &str {
-        &self.0.name
+    pub fn name(&self) -> String {
+        self.0.profile.lock().unwrap().name.clone()
     }
 
-    pub fn fp(&self) -> &str {
-        &self.0.fp
+    pub fn fp(&self) -> String {
+        self.0.profile.lock().unwrap().fp.clone()
+    }
+
+    /// Avatar sendiri (PNG base64), kalau ada.
+    pub fn avatar(&self) -> Option<String> {
+        self.0.profile.lock().unwrap().avatar.clone()
     }
 
     pub fn port(&self) -> u16 {
@@ -323,7 +383,7 @@ impl Node {
         self.emit(Event::Text {
             id: msg_id.clone(),
             from: self.0.id.clone(),
-            from_name: self.0.name.clone(),
+            from_name: self.name(),
             to: to.to_string(),
             body: body.to_string(),
             ts,
@@ -341,7 +401,7 @@ impl Node {
         self.emit(Event::Text {
             id: msg_id.clone(),
             from: self.0.id.clone(),
-            from_name: self.0.name.clone(),
+            from_name: self.name(),
             to: room.clone(),
             body: body.to_string(),
             ts,
@@ -413,7 +473,7 @@ impl Node {
         let offer = Frame::FileOffer {
             id: msg_id.clone(),
             from: self.0.id.clone(),
-            from_name: self.0.name.clone(),
+            from_name: self.name(),
             to: to.to_string(),
             name: meta.name.clone(),
             size: meta.size,
@@ -460,7 +520,7 @@ impl Node {
         self.emit(Event::FileOffer {
             id: msg_id.clone(),
             from: self.0.id.clone(),
-            from_name: self.0.name.clone(),
+            from_name: self.name(),
             to: to.to_string(),
             name: meta.name.clone(),
             size: meta.size,
@@ -550,7 +610,7 @@ impl Node {
             Frame::CallOffer {
                 call_id: call_id.to_string(),
                 from: self.0.id.clone(),
-                from_name: self.0.name.clone(),
+                from_name: self.name(),
                 to: to.to_string(),
                 sdp: sdp.to_string(),
                 ts: now_ms(),
@@ -633,7 +693,7 @@ impl Node {
         let frame = Frame::Text {
             id: msg_id.clone(),
             from: self.0.id.clone(),
-            from_name: self.0.name.clone(),
+            from_name: self.name(),
             to: to_field,
             ts,
             body: body.to_string(),
@@ -658,6 +718,54 @@ impl Node {
             let _ = tx.try_send(frame.clone());
         }
         Ok((msg_id, ts))
+    }
+
+    /// Ubah nama tampilan dan/atau avatar, simpan, lalu beri tahu semua peer.
+    ///
+    /// `avatar = None` artinya tidak diubah. Untuk menghapus avatar, kirim
+    /// `Some(String::new())`.
+    pub fn set_profile(&self, name: Option<&str>, avatar: Option<String>) -> Result<()> {
+        let (name, fp, av) = {
+            let mut p = self.0.profile.lock().unwrap();
+            if let Some(n) = name {
+                let n = n.trim();
+                if n.is_empty() {
+                    bail!("nama tidak boleh kosong");
+                }
+                if n.chars().count() > 32 {
+                    bail!("nama maksimal 32 karakter");
+                }
+                p.name = n.to_string();
+                p.fp = format!("{}#{}", p.name, &self.0.id[..4]);
+            }
+            if let Some(a) = avatar {
+                p.avatar = if a.is_empty() { None } else { Some(a) };
+            }
+            let snapshot = (p.name.clone(), p.fp.clone(), p.avatar.clone());
+            let _ = p.save(&self.0.data_dir);
+            snapshot
+        };
+
+        // Announce berikutnya membawa nama baru; update sekarang juga supaya
+        // peer yang mendengarkan multicast langsung melihatnya.
+        {
+            let mut a = self.0.announce.lock().unwrap();
+            a.name = name.clone();
+            a.fp = fp.clone();
+            a.ts = now_ms();
+        }
+
+        let frame = Frame::Profile {
+            id: self.0.id.clone(),
+            name,
+            avatar: av.unwrap_or_default(),
+            ts: now_ms(),
+        };
+        let senders: Vec<mpsc::Sender<Frame>> = self.0.conns.lock().unwrap().values().cloned().collect();
+        for tx in senders {
+            let _ = tx.try_send(frame.clone());
+        }
+        Ok(())
     }
 
     /// Dial peer secara manual (fallback kalau discovery diblok jaringan, dan buat test).
@@ -755,6 +863,8 @@ impl Node {
             online: true,
             // Dari announce multicast: belum ada bukti kriptografis.
             verified: false,
+            // Announce tidak membawa avatar; diisi nanti oleh frame Profile.
+            avatar: None,
         };
         let (is_new, status_changed) = self.upsert_peer(peer.clone());
         if is_new {
@@ -769,6 +879,18 @@ impl Node {
     }
 
     /// Insert/refresh peer. `(baru, status berubah)`.
+    /// Terapkan nama/avatar peer yang baru tanpa menghapus status lain.
+    fn apply_peer_profile(&self, id: &str, name: &str, avatar: Option<String>) {
+        let mut peers = self.0.peers.lock().unwrap();
+        if let Some(p) = peers.get_mut(id) {
+            p.name = name.to_string();
+            p.fp = format!("{}#{}", name, &id[..4.min(id.len())]);
+            if avatar.is_some() {
+                p.avatar = avatar;
+            }
+        }
+    }
+
     fn upsert_peer(&self, p: Peer) -> (bool, bool) {
         let mut peers = self.0.peers.lock().unwrap();
         match peers.get_mut(&p.id) {
@@ -790,6 +912,11 @@ impl Node {
                 // tidak membawa bukti, sedangkan handshake TLS membawanya. Kalau
                 // announce datang belakangan, status terverifikasi tidak boleh hilang.
                 old.verified = old.verified || p.verified;
+                // Avatar dari frame Profile tidak boleh hilang karena announce
+                // berikutnya (announce tidak membawa avatar).
+                if p.avatar.is_some() {
+                    old.avatar = p.avatar.clone();
+                }
                 (false, status_changed)
             }
             None => {
@@ -859,8 +986,8 @@ impl Node {
         let hello = Frame::Hello {
             v: PROTO_VERSION,
             id: self.0.id.clone(),
-            name: self.0.name.clone(),
-            fp: self.0.fp.clone(),
+            name: self.name(),
+            fp: self.fp(),
             port: self.0.port,
             os: std::env::consts::OS.to_string(),
             status: self.status(),
@@ -912,6 +1039,39 @@ impl Node {
             None => return Ok(()),
         };
 
+        // 3. Tukar profil (nama + avatar) supaya peer langsung punya data terbaru.
+        {
+            let (my_name, my_avatar) = {
+                let p = self.0.profile.lock().unwrap();
+                (p.name.clone(), p.avatar.clone().unwrap_or_default())
+            };
+            let _ = write_frame(
+                &mut wr,
+                &Frame::Profile {
+                    id: self.0.id.clone(),
+                    name: my_name,
+                    avatar: my_avatar,
+                    ts: now_ms(),
+                },
+            )
+            .await;
+        }
+        match read_frame(&mut rd).await {
+            Ok(Some(Frame::Profile { id, name, avatar, .. })) if id == pid => {
+                if !name.trim().is_empty() {
+                    let av = if avatar.is_empty() { None } else { Some(avatar) };
+                    self.apply_peer_profile(&pid, &name, av.clone());
+                    self.emit(Event::PeerProfile { id: pid.clone(), name, avatar: av });
+                }
+            }
+            // Peer lama tidak mengirim profil: bukan masalah, nama dari Hello dipakai.
+            Ok(Some(other)) => {
+                self.handle_frame(other).await.ok();
+            }
+            Ok(None) => return Ok(()),
+            Err(_) => {}
+        }
+
         let (tx, mut rx) = mpsc::channel::<Frame>(256);
         if self.0.conns.lock().unwrap().insert(pid.clone(), tx).is_some() {
             tracing::debug!("koneksi lama ke {pid} diganti yang baru");
@@ -937,6 +1097,8 @@ impl Node {
             status: pstatus,
             online: true,
             verified,
+            // Diisi dari frame Profile yang ditukar setelah Auth.
+            avatar: None,
         };
         let (is_new, status_changed) = self.upsert_peer(peer.clone());
         if is_new {
@@ -968,6 +1130,16 @@ impl Node {
             // Auth hanya diproses di fase handshake (run_conn). Kalau muncul lagi
             // di tengah sesi, abaikan: identitas sudah ditetapkan saat koneksi dibuka.
             Frame::Auth { .. } => {}
+            Frame::Profile { id, name, avatar, .. } => {
+                // Hanya terima profil dari peer yang benar-benar terhubung, dan
+                // jangan biarkan id lain menimpa profil orang lain.
+                let known = self.0.conns.lock().unwrap().contains_key(&id);
+                if known && !name.trim().is_empty() {
+                    let av = if avatar.is_empty() { None } else { Some(avatar) };
+                    self.apply_peer_profile(&id, &name, av.clone());
+                    self.emit(Event::PeerProfile { id, name, avatar: av });
+                }
+            }
             Frame::Text {
                 id,
                 from,

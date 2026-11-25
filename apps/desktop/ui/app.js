@@ -44,18 +44,79 @@ function initials(name) {
   if (!parts.length) return "?";
   return (parts[0][0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
 }
+/** Escape untuk disisipkan ke atribut HTML (nama user berasal dari jaringan). */
+function escapeAttr(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Perkecil gambar ke kotak `max` px (rasio dipertahankan), hasil PNG data URL.
+ * Dilakukan di klien supaya frame Profile tetap kecil — avatar 500 KB dikirim
+ * ke setiap peer setiap kali berubah akan terasa di grup besar.
+ */
+function downscaleImage(file, max) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const hgt = Math.max(1, Math.round(img.height * scale));
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = hgt;
+      const ctx = c.getContext("2d");
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, w, hgt);
+      try {
+        resolve(c.toDataURL("image/png"));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("gambar tidak bisa dibaca")); };
+    img.src = url;
+  });
+}
+
 function hueOf(str) {
   let h = 0;
   for (const c of String(str)) h = (h * 31 + c.charCodeAt(0)) % 360;
   return h;
 }
-function avatarEl(name, extra = "", group = false) {
+/**
+ * Avatar: foto kalau ada, inisial kalau tidak.
+ * `photo` boleh data URL (dari peer) atau path file (avatar sendiri).
+ */
+function avatarEl(name, extra = "", group = false, photo = null) {
   const a = h("div", "avatar " + extra);
-  a.textContent = initials(name);
   const hue = hueOf(name);
   a.style.background = `linear-gradient(160deg, hsl(${hue} 70% 62%), hsl(${(hue + 32) % 360} 68% 48%))`;
   if (group) a.classList.add("grp");
+  if (photo) {
+    const img = document.createElement("img");
+    img.src = photo;
+    img.alt = name;
+    img.loading = "lazy";
+    // Kalau gambar gagal dimuat, kembalikan ke inisial (jangan kotak kosong).
+    img.onerror = () => { img.remove(); a.textContent = initials(name); };
+    a.appendChild(img);
+    a.classList.add("has-photo");
+  } else {
+    a.textContent = initials(name);
+  }
   return a;
+}
+
+/** Foto avatar peer dari daftar peer (kalau ada). */
+function peerPhoto(id) {
+  const p = S.peers.find((x) => x.id === id);
+  return (p && p.avatar) || null;
 }
 function statusDot(status, online = true) {
   const d = h("span", "dot " + (online ? status || "online" : "offline"));
@@ -104,8 +165,22 @@ function renderMe() {
   if (!S.me) return;
   $("me-name").textContent = S.me.name;
   const av = $("me-avatar");
-  av.firstChild.textContent = initials(S.me.name);
+  // Simpan titik status supaya tidak ikut terhapus saat avatar diganti.
+  const dot = $("me-dot");
+  av.innerHTML = "";
+  if (S.me.avatar) {
+    const img = document.createElement("img");
+    img.src = S.me.avatar;
+    img.alt = S.me.name;
+    img.onerror = () => { img.remove(); av.textContent = initials(S.me.name); };
+    av.appendChild(img);
+    av.classList.add("has-photo");
+  } else {
+    av.textContent = initials(S.me.name);
+    av.classList.remove("has-photo");
+  }
   av.style.background = `linear-gradient(160deg,#0a84ff,#5e5ce6)`;
+  if (dot) av.appendChild(dot);
   const st = S.me.status || "online";
   $("me-status-dot").style.background = `var(--${st === "dnd" ? "dnd" : st})`;
   $("me-status-text").textContent = STATUS_LABEL[st] || "Online";
@@ -127,7 +202,7 @@ function renderThreads() {
   for (const t of list) {
     const li = h("li", "thread" + (t.id === S.active ? " active" : "") + (threadUnread(t) ? " has-unread" : ""));
     li.dataset.id = t.id;
-    const av = avatarEl(t.name, "", t.kind === "group");
+    const av = avatarEl(t.name, "", t.kind === "group", t.kind === "dm" ? peerPhoto(t.id) : null);
     const p = S.peers.find((x) => x.id === t.id);
     if (t.kind === "dm" && p) av.appendChild(statusDot(p.status, p.online));
     li.appendChild(av);
@@ -162,7 +237,7 @@ function renderPeers() {
   }
   for (const p of list) {
     const li = h("li", "thread peer-row");
-    const av = avatarEl(p.name);
+    const av = avatarEl(p.name, "", false, p.avatar || null);
     av.appendChild(statusDot(p.status, p.online));
     li.appendChild(av);
     const main = h("div", "tmain");
@@ -548,7 +623,22 @@ function settingsModal() {
   const s = S.settings;
   const colors = ["#0b84ff", "#34c759", "#ff375f", "#af52de", "#ff9f0a", "#5e5ce6", "#2c2c2e", "#00c7be"];
   openModal(`
-    <h3>Pengaturan tampilan</h3>
+    <h3>Profil</h3>
+    <div class="profile-edit">
+      <div class="avatar big me" id="pf-avatar">${initials(S.me.name)}</div>
+      <div class="profile-fields">
+        <label class="field">
+          <span>Nama tampilan</span>
+          <input type="text" id="pf-name" maxlength="32" placeholder="Nama kamu" value="${escapeAttr(S.me.name)}">
+        </label>
+        <div class="profile-actions">
+          <button class="btn sm" id="pf-photo">Pilih foto…</button>
+          <button class="btn sm ghost" id="pf-photo-clear">Hapus foto</button>
+        </div>
+        <div class="hint" id="pf-hint">Nama ini yang dilihat peer lain — bukan nama PC.</div>
+      </div>
+    </div>
+    <h3 style="margin-top:18px">Tampilan</h3>
     <div class="row-line"><span>Tema</span>
       <select id="st-theme">
         <option value="light">Light</option>
@@ -569,6 +659,72 @@ function settingsModal() {
       <button class="btn" id="st-reset">Reset</button>
       <button class="btn primary" id="st-done">Selesai</button>
     </div>`);
+  // --- profil ---
+  const pfAv = $("pf-avatar");
+  const paintPfAv = () => {
+    pfAv.innerHTML = "";
+    if (S.me.avatar) {
+      const img = document.createElement("img");
+      img.src = S.me.avatar;
+      img.alt = S.me.name;
+      pfAv.appendChild(img);
+      pfAv.classList.add("has-photo");
+    } else {
+      pfAv.textContent = initials(S.me.name);
+      pfAv.classList.remove("has-photo");
+    }
+  };
+  paintPfAv();
+
+  const saveName = async () => {
+    const v = $("pf-name").value.trim();
+    if (!v || v === S.me.name) return;
+    try {
+      S.me = await invoke("set_display_name", { name: v });
+      renderMe();
+      $("pf-hint").textContent = "Nama disimpan — peer lain langsung melihatnya.";
+    } catch (err) {
+      $("pf-hint").textContent = "Gagal: " + String(err);
+    }
+  };
+  $("pf-name").onblur = saveName;
+  $("pf-name").onkeydown = (e) => { if (e.key === "Enter") saveName(); };
+
+  $("pf-photo").onclick = async () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/webp,image/gif";
+    input.onchange = async () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      try {
+        // Perkecil di klien: avatar tidak perlu lebih dari 128px, dan ini
+        // menjaga frame Profile tetap kecil saat dikirim ke banyak peer.
+        const dataUrl = await downscaleImage(f, 128);
+        S.me = await invoke("set_my_avatar", { dataBase64: dataUrl });
+        paintPfAv();
+        renderMe();
+        renderThreads();
+        $("pf-hint").textContent = "Foto profil disimpan.";
+      } catch (err) {
+        $("pf-hint").textContent = "Gagal: " + String(err);
+      }
+    };
+    input.click();
+  };
+
+  $("pf-photo-clear").onclick = async () => {
+    try {
+      S.me = await invoke("clear_my_avatar");
+      paintPfAv();
+      renderMe();
+      renderThreads();
+      $("pf-hint").textContent = "Foto profil dihapus, kembali ke inisial.";
+    } catch (err) {
+      $("pf-hint").textContent = "Gagal: " + String(err);
+    }
+  };
+
   $("st-theme").value = s.theme;
   $("st-theme").onchange = (e) => setTheme(e.target.value);
   $("st-colors").onclick = (e) => {

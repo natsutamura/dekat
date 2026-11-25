@@ -107,6 +107,17 @@ pub enum Frame {
     ///
     /// Dikirim kedua arah setelah `Hello`, karena tanda tangan mengikat
     /// pasangan id — dan id peer baru diketahui setelah `Hello` diterima.
+    /// Profil publik: nama tampilan + avatar (PNG base64, boleh kosong).
+    ///
+    /// Dikirim setelah `Auth` (saat koneksi baru) dan setiap kali user mengubah
+    /// profilnya, supaya peer lain langsung memakai nama/foto terbaru.
+    Profile {
+        id: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        avatar: String,
+        ts: u64,
+    },
     Auth {
         /// Public key Ed25519 lengkap (hex 32 byte).
         pk: String,
