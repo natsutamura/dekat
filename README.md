@@ -46,3 +46,8 @@ Binary kecil (LTO + strip), RAM rendah, dan bisa dipakai ulang apa pun framework
 M0 masih plaintext: id node berasal dari public key Ed25519, tapi frame belum ditandatangani
 dan TLS belum aktif. Jangan dipakai di jaringan yang tidak dipercaya sampai M1 selesai
 (TLS + pinning TOFU + signature per pesan).
+
+## Mockup UI
+
+`apps/mockup/index.html` — mockup statis (buka di browser, `?theme=dark` untuk tema gelap).
+Screenshot: `apps/mockup/mockup-light.png` dan `mockup-dark.png`.
