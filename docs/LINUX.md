@@ -94,3 +94,12 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 dekat
 - Belum ada paket AUR resmi; PKGBUILD disediakan di repo.
 - Wayland: jalan lewat XWayland. Kalau ada masalah input, coba
   `GDK_BACKEND=x11 dekat`.
+## Ikon
+
+`apps/desktop/icons/icon.png` (RGBA 1024×1024) adalah sumber utama; `icon.ico`
+dibuat dari situ untuk Windows. Versi vektornya ada di `dekat.svg`.
+
+Gradasi ikon ini bukan radial biasa: warnanya memakai pendar dari tepi (terang di
+pinggir, pekat di tengah). Banyak tool ekspor SVG membuang efek ini dan
+menghasilkan gambar flat — karena itu SVG-nya memakai `feGaussianBlur` pada stroke
+tebal yang di-clip ke bentuk squircle. Kalau butuh gradasi yang persis, pakai PNG-nya.
