@@ -92,3 +92,23 @@ Windows kadang menggabungkan notifikasi ke pemilik proses induk.
 - Installer (`.msi`), jadi masih zip portable
 - TLS: traffic di LAN masih plaintext
 - Group call, video call
+## Di mana data disimpan
+
+| isi | lokasi |
+|---|---|
+| File yang diterima (gambar, dokumen) | `C:\Users\<nama>\Downloads\LAN Chat\` |
+| Riwayat chat (SQLite) | `C:\Users\<nama>\AppData\Roaming\LANChat\lanchat.db` |
+| Identitas + kunci TLS | `...\AppData\Roaming\LANChat\identity.json`, `tls\` |
+| Nama & foto profil | `...\AppData\Roaming\LANChat\profile.json` |
+
+File masuk sengaja ditaruh di **Downloads** supaya mudah ditemukan, seperti
+aplikasi LAN Chat lain. Riwayat chat tetap di AppData karena itu database
+aplikasi, bukan dokumen milik user.
+
+Mau simpan file di folder lain? Set environment variable sebelum menjalankan app:
+
+```powershell
+set LANCHAT_FILES_DIR=D:\Share\LAN Chat
+```
+
+Lokasi aktif bisa dilihat dan dibuka dari **Pengaturan → File masuk**.

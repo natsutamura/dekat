@@ -15,6 +15,7 @@ struct App {
     store: Arc<Store>,
     /// thread yang sedang dibuka di UI (buat nentuin unread)
     active: Mutex<Option<String>>,
+    data_dir: std::path::PathBuf,
 }
 
 type AppState = Arc<App>;
@@ -130,6 +131,32 @@ fn targets_for(st: &App, thread: &Thread) -> Vec<String> {
         .filter(|id| connected.iter().any(|c| c == *id))
         .cloned()
         .collect()
+}
+
+/// Lokasi penyimpanan yang dipakai aplikasi ini (untuk ditampilkan ke user).
+#[derive(Serialize)]
+struct StorageInfo {
+    data_dir: String,
+    files_dir: String,
+    db_path: String,
+}
+
+#[tauri::command]
+fn storage_info(state: State<AppState>) -> StorageInfo {
+    let files = state.node.files_dir();
+    StorageInfo {
+        data_dir: state.data_dir.to_string_lossy().to_string(),
+        files_dir: files.to_string_lossy().to_string(),
+        db_path: state.data_dir.join("lanchat.db").to_string_lossy().to_string(),
+    }
+}
+
+/// Buka folder file masuk di file manager OS.
+#[tauri::command]
+fn open_files_dir(state: State<AppState>) -> Result<String, String> {
+    let dir = state.node.files_dir();
+    std::fs::create_dir_all(&dir).map_err(e2s)?;
+    Ok(dir.to_string_lossy().to_string())
 }
 
 /// Info pairing: URI yang bisa dibagikan (QR / teks) + QR sebagai SVG.
@@ -434,9 +461,15 @@ fn set_unread(state: State<AppState>, threadId: String, unread: bool) -> Result<
 
 #[tauri::command]
 #[allow(non_snake_case)] // argumen camelCase biar cocok dengan invoke() di JS
-fn clear_chat(state: State<AppState>, threadId: String) -> Result<(), String> {
+fn clear_chat(
+    state: State<AppState>,
+    threadId: String,
+    deleteFiles: Option<bool>,
+) -> Result<usize, String> {
     let st = state.inner().clone();
-    st.store.clear_thread(&threadId).map_err(e2s)
+    st.store
+        .clear_thread_ex(&threadId, deleteFiles.unwrap_or(false))
+        .map_err(e2s)
 }
 
 #[tauri::command]
@@ -1168,6 +1201,32 @@ fn default_name() -> String {
 }
 
 /// Folder data default. Di Windows pakai %APPDATA%\LANChat, di Unix ~/.lanchat.
+/// Folder tempat file yang diterima disimpan: `Downloads/LAN Chat`.
+///
+/// Bisa ditimpa dengan `LANCHAT_FILES_DIR` (mis. untuk menyimpan ke drive lain).
+fn files_dir() -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("LANCHAT_FILES_DIR") {
+        if !p.trim().is_empty() {
+            return std::path::PathBuf::from(p);
+        }
+    }
+    let base = if cfg!(windows) {
+        // USERPROFILE ada di Windows; HOME biasanya tidak diset untuk app GUI.
+        std::env::var("USERPROFILE")
+            .map(std::path::PathBuf::from)
+            .or_else(|_| std::env::var("HOME").map(std::path::PathBuf::from))
+    } else {
+        std::env::var("HOME").map(std::path::PathBuf::from)
+    };
+    match base {
+        Ok(home) => home.join("Downloads").join("LAN Chat"),
+        // Fallback: di samping executable.
+        Err(_) => std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join("LAN Chat"),
+    }
+}
+
 fn default_data_dir() -> std::path::PathBuf {
     if cfg!(windows) {
         if let Ok(appdata) = std::env::var("APPDATA") {
@@ -1202,6 +1261,10 @@ fn main() {
 
             let mut cfg = Config::new(name, dir.clone());
             cfg.port = port;
+            // File masuk ke Downloads supaya gampang ditemukan, seperti aplikasi
+            // LAN Chat lain. Riwayat chat tetap di folder data aplikasi (AppData)
+            // karena itu database, bukan dokumen milik user.
+            cfg.files_dir = Some(files_dir());
             // Default: hanya peer yang mendukung TLS. Dinyalakan lewat env kalau
             // memang harus bicara dengan build lama (risiko penyadapan diterima).
             cfg.allow_plaintext = std::env::var("LANCHAT_ALLOW_PLAINTEXT").is_ok();
@@ -1239,6 +1302,7 @@ fn main() {
                 node,
                 store: Arc::new(store),
                 active: Mutex::new(None),
+                data_dir: dir.clone(),
             });
             app.manage(state.clone());
 
@@ -1267,6 +1331,8 @@ fn main() {
             set_status,
             set_display_name,
             pairing_qr,
+            storage_info,
+            open_files_dir,
             add_peer_uri,
             set_my_avatar,
             clear_my_avatar,

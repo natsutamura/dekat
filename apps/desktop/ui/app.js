@@ -588,6 +588,36 @@ function showMenu(x, y, items) {
   m.hidden = false;
 }
 
+/**
+ * Alur "bersihkan chat": konfirmasi dulu, lalu tanya apakah file ikut dihapus.
+ *
+ * File tidak dihapus secara default karena file yang sudah diterima tersimpan
+ * di Downloads dan itu milik user — menghapus riwayat chat bukan berarti
+ * membuang dokumennya.
+ */
+async function clearChatFlow(t) {
+  const ok = await confirmModal({
+    title: "Bersihkan chat",
+    body: `Semua pesan di "${t.name}" akan dihapus dari perangkat ini. Pesan di perangkat lain tidak terpengaruh.`,
+    confirmLabel: "Bersihkan",
+    danger: true,
+    extraHtml: `<label class="pick" style="margin:6px 0">
+        <input type="checkbox" id="cc-files"><span class="nm">Hapus juga file lampiran dari disk</span>
+      </label>`,
+  });
+  if (!ok) return;
+  const delFiles = !!($("cc-files") && $("cc-files").checked);
+  try {
+    const n = await invoke("clear_chat", { threadId: t.id, deleteFiles: delFiles });
+    S.messages.set(t.id, []);
+    await refreshThreads();
+    if (S.active === t.id) renderMessages();
+    toast("Chat dibersihkan", delFiles ? `${n} file dihapus` : "File lampiran tetap disimpan");
+  } catch (err) {
+    toast("Gagal membersihkan", String(err));
+  }
+}
+
 function showThreadMenu(e, t) {
   const unread = threadUnread(t);
   showMenu(e.clientX, e.clientY, [
@@ -598,17 +628,7 @@ function showThreadMenu(e, t) {
         await refreshThreads();
       },
     },
-    {
-      label: "Hapus semua pesan (clear chat)",
-      danger: true,
-      run: async () => {
-        if (!confirm(`Hapus semua pesan di "${t.name}"? Riwayat hilang dari perangkat ini.`)) return;
-        await invoke("clear_chat", { threadId: t.id });
-        S.messages.set(t.id, []);
-        await refreshThreads();
-        if (S.active === t.id) renderMessages();
-      },
-    },
+    { label: "Bersihkan chat…", danger: true, run: () => clearChatFlow(t) },
   ]);
 }
 
@@ -617,6 +637,29 @@ function openModal(html) {
   $("modal").hidden = false;
 }
 function closeModal() { $("modal").hidden = true; }
+
+/**
+ * Konfirmasi pakai modal aplikasi, bukan `confirm()` bawaan webview.
+ *
+ * `confirm()` di WebKitGTK/Tauri memblokir event loop dan di beberapa build
+ * tidak muncul sama sekali, sehingga aksi berbahaya bisa jalan tanpa bertanya
+ * atau tidak jalan sama sekali. Modal ini mengembalikan Promise<boolean>.
+ */
+function confirmModal({ title, body, confirmLabel = "Lanjut", danger = false, extraHtml = "" }) {
+  return new Promise((resolve) => {
+    openModal(`
+      <h3>${escapeAttr(title)}</h3>
+      <div class="hint" style="margin:0 0 10px">${escapeAttr(body)}</div>
+      ${extraHtml}
+      <div class="actions">
+        <button class="btn" id="cm-cancel">Batal</button>
+        <button class="btn ${danger ? "danger" : "primary"}" id="cm-ok">${escapeAttr(confirmLabel)}</button>
+      </div>`);
+    const done = (v) => { closeModal(); resolve(v); };
+    $("cm-cancel").onclick = () => done(false);
+    $("cm-ok").onclick = () => done(true);
+  });
+}
 
 /* ---------------- modal: pengaturan ---------------- */
 /* ---------------- modal: pairing (QR) ---------------- */
@@ -703,6 +746,10 @@ function settingsModal() {
       <input type="range" id="st-scale" min="0.8" max="1.6" step="0.05" value="${s.scale}">
     </div>
     <div class="hint">Ctrl + scroll, Ctrl + / Ctrl − , atau Ctrl 0 buat zoom cepat. Window bisa di-resize bebas.</div>
+    <div class="row-line"><span>File masuk</span>
+      <button class="btn sm" id="pf-files">Buka folder…</button>
+    </div>
+    <div class="hint" id="pf-files-path" style="margin-top:-4px">…</div>
     <div class="row-line"><span>Pairing</span>
       <button class="btn sm" id="pf-pair">Tambah peer lewat QR…</button>
     </div>
@@ -765,6 +812,22 @@ function settingsModal() {
   };
 
   $("pf-pair").onclick = pairingModal;
+
+  // Lokasi penyimpanan: user perlu tahu file-nya ada di mana.
+  invoke("storage_info")
+    .then((si) => {
+      const el = $("pf-files-path");
+      if (el) el.textContent = si.filesDir;
+    })
+    .catch(() => {});
+  $("pf-files").onclick = async () => {
+    try {
+      const p = await invoke("open_files_dir");
+      await invoke("open_path", { path: p });
+    } catch (err) {
+      toast("Gagal buka folder", String(err));
+    }
+  };
 
   $("pf-photo-clear").onclick = async () => {
     try {
@@ -1029,9 +1092,19 @@ async function boot() {
 
     window.LanChatCall.startCall(online, t.name);
   };
-  $("btn-info").onclick = () => {
+  $("btn-info").onclick = (e) => {
     const t = S.threads.find((x) => x.id === S.active);
     if (!t) return;
+    // Menu aksi cepat; "Bersihkan chat" ada di sini supaya tidak perlu
+    // tahu soal klik-kanan di daftar percakapan.
+    const r = e.currentTarget.getBoundingClientRect();
+    showMenu(r.right - 210, r.bottom + 6, [
+      { label: "Info percakapan", run: () => threadInfoModal(t) },
+      { label: "Bersihkan chat…", danger: true, run: () => clearChatFlow(t) },
+    ]);
+  };
+
+  function threadInfoModal(t) {
     openModal(`<h3>${t.name}</h3>
       <div class="row-line"><span>Jenis</span><span>${t.kind}</span></div>
       <div class="row-line"><span>Id</span><span>${t.id}</span></div>

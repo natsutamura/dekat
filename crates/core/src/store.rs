@@ -311,17 +311,54 @@ impl Store {
     }
 
     pub fn clear_thread(&self, thread_id: &str) -> Result<()> {
-        let db = self.db.lock().unwrap();
-        db.execute(
-            "DELETE FROM attachments WHERE msg_id IN (SELECT id FROM messages WHERE thread_id=?1)",
-            params![thread_id],
-        )?;
-        db.execute("DELETE FROM messages WHERE thread_id=?1", params![thread_id])?;
-        db.execute(
-            "UPDATE threads SET preview='', unread=0, manual_unread=0 WHERE id=?1",
-            params![thread_id],
-        )?;
-        Ok(())
+        self.clear_thread_ex(thread_id, false).map(|_| ())
+    }
+
+    /// Hapus riwayat satu thread.
+    ///
+    /// `delete_files=true` juga menghapus file lampiran dari disk. Default
+    /// `false`: file yang sudah diterima adalah milik user (ada di Downloads),
+    /// jadi menghapus riwayat chat tidak otomatis membuang dokumennya.
+    ///
+    /// Mengembalikan jumlah file yang dihapus.
+    pub fn clear_thread_ex(&self, thread_id: &str, delete_files: bool) -> Result<usize> {
+        let paths: Vec<String> = if delete_files {
+            let db = self.db.lock().unwrap();
+            let mut stmt = db.prepare(
+                "SELECT a.file_path FROM attachments a
+                 JOIN messages m ON m.id = a.msg_id
+                 WHERE m.thread_id = ?1 AND a.file_path IS NOT NULL AND a.file_path != ''",
+            )?;
+            let rows = stmt.query_map(params![thread_id], |r| r.get::<_, String>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        } else {
+            Vec::new()
+        };
+
+        {
+            let db = self.db.lock().unwrap();
+            db.execute(
+                "DELETE FROM attachments WHERE msg_id IN (SELECT id FROM messages WHERE thread_id=?1)",
+                params![thread_id],
+            )?;
+            db.execute("DELETE FROM messages WHERE thread_id=?1", params![thread_id])?;
+            db.execute(
+                "UPDATE threads SET preview='', unread=0, manual_unread=0 WHERE id=?1",
+                params![thread_id],
+            )?;
+        }
+
+        // Hapus file di luar lock DB supaya I/O tidak menahan thread lain.
+        let mut removed = 0usize;
+        for p in paths {
+            // Hanya hapus file biasa; folder atau path aneh dilewati.
+            if let Ok(meta) = std::fs::metadata(&p) {
+                if meta.is_file() && std::fs::remove_file(&p).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+        Ok(removed)
     }
 
     pub fn delete_thread(&self, thread_id: &str) -> Result<()> {
@@ -498,6 +535,59 @@ mod tests {
         let m = s.messages("p3", 10).unwrap();
         assert!(m[0].read && m[0].delivered);
         assert!(m[1].read && m[1].delivered, "pesan 2 juga sudah dibaca");
+    }
+
+    #[test]
+    fn clear_thread_dengan_file_menghapus_lampiran() {
+        let s = Store::open_in_memory().unwrap();
+        s.ensure_thread(&Thread {
+            id: "pc".into(), kind: "dm".into(), name: "peer".into(), members: vec!["pc".into()],
+            last_ts: 0, unread: 0, manual_unread: false, preview: String::new(),
+        }).unwrap();
+
+        // dua file nyata di disk
+        let dir = std::env::temp_dir().join(format!("lanchat-clear-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let f1 = dir.join("a.txt");
+        let f2 = dir.join("b.txt");
+        std::fs::write(&f1, b"satu").unwrap();
+        std::fs::write(&f2, b"dua").unwrap();
+
+        for (id, path) in [("m-a", &f1), ("m-b", &f2)] {
+            let mut m = msg(id, "pc", 100, true, "");
+            m.attachment = Some(Attachment {
+                name: path.file_name().unwrap().to_string_lossy().to_string(),
+                size: 4,
+                path: path.to_string_lossy().to_string(),
+                sha256: "x".into(),
+                mime: String::new(),
+            });
+            s.save_message(&m).unwrap();
+        }
+
+        // tanpa delete_files: file tetap ada
+        let n = s.clear_thread_ex("pc", false).unwrap();
+        assert_eq!(n, 0, "tanpa flag, tidak ada file dihapus");
+        assert!(f1.exists() && f2.exists(), "file harus tetap ada");
+
+        // ulangi lalu hapus dengan file
+        for (id, path) in [("m-c", &f1), ("m-d", &f2)] {
+            let mut m = msg(id, "pc", 200, true, "");
+            m.attachment = Some(Attachment {
+                name: path.file_name().unwrap().to_string_lossy().to_string(),
+                size: 4,
+                path: path.to_string_lossy().to_string(),
+                sha256: "x".into(),
+                mime: String::new(),
+            });
+            s.save_message(&m).unwrap();
+        }
+        let n = s.clear_thread_ex("pc", true).unwrap();
+        assert_eq!(n, 2, "dua file harus dihapus");
+        assert!(!f1.exists() && !f2.exists(), "file harus terhapus dari disk");
+        assert!(s.messages("pc", 10).unwrap().is_empty(), "riwayat harus kosong");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

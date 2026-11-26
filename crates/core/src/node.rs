@@ -34,6 +34,11 @@ pub struct Config {
     pub seeds: Vec<SocketAddr>,
     /// matikan presence multicast (dipakai test supaya tidak saling ganggu)
     pub discovery: bool,
+    /// Folder file masuk. `None` = `<data_dir>/files`.
+    ///
+    /// Aplikasi desktop mengisinya dengan `Downloads/LAN Chat` supaya file yang
+    /// diterima mudah ditemukan, seperti aplikasi LAN Chat lain.
+    pub files_dir: Option<PathBuf>,
     /// Terima peer versi lama yang belum mendukung TLS.
     ///
     /// Default `false`: koneksi tanpa TLS **ditolak**. Dinyalakan hanya kalau user
@@ -49,6 +54,7 @@ impl Config {
             data_dir: data_dir.into(),
             seeds: Vec::new(),
             discovery: true,
+            files_dir: None,
             allow_plaintext: false,
         }
     }
@@ -286,7 +292,7 @@ impl Node {
             conns: Mutex::new(HashMap::new()),
             connecting: Mutex::new(HashSet::new()),
             events,
-            files_dir: cfg.data_dir.join("files"),
+            files_dir: cfg.files_dir.clone().unwrap_or_else(|| cfg.data_dir.join("files")),
             transfers: FileTransfer::new(),
             pending_accept: Mutex::new(HashMap::new()),
             pending_done: Mutex::new(HashMap::new()),
