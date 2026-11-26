@@ -31,14 +31,14 @@ Tidak perlu instalasi. Butuh FUSE; kalau tidak ada:
 ### 3. tar.gz portabel
 
 ```bash
-tar -xzf dekat-0.2.0-linux-x64.tar.gz
-sudo cp dekat-0.2.0-linux-x64/usr/bin/dekat /usr/local/bin/
+tar -xzf dekat-0.3.0-linux-x64.tar.gz
+sudo cp dekat-0.3.0-linux-x64/usr/bin/dekat /usr/local/bin/
 ```
 
 ### 4. Debian / Ubuntu
 
 ```bash
-sudo apt install ./Dekat_0.2.0_amd64.deb
+sudo apt install ./Dekat_0.3.0_amd64.deb
 ```
 
 ## Dependensi runtime
