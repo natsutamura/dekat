@@ -24,7 +24,7 @@ conflicts=('lanchat')
 options=('!strip')   # binary sudah di-strip oleh profil release
 
 source=("https://github.com/natsutamura/lanchat/releases/download/v${pkgver}/lanchat-${pkgver}-linux-x64.tar.gz")
-sha256sums=('b5a027029a2cc9cd52985c2c0cb4e1b50bd96330ee517e60bdb087e0aaf841e3')
+sha256sums=('cedfa19c81d1799616433375aa964f2dedc8171fc19f991903087e241ce52e43')
 
 package() {
   install -Dm755 "${srcdir}/lanchat-${pkgver}-linux-x64/usr/bin/lanchat" \
