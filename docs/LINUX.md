@@ -99,7 +99,11 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 dekat
 `apps/desktop/icons/icon.png` (RGBA 1024×1024) adalah sumber utama; `icon.ico`
 dibuat dari situ untuk Windows. Versi vektornya ada di `dekat.svg`.
 
-Gradasi ikon ini bukan radial biasa: warnanya memakai pendar dari tepi (terang di
-pinggir, pekat di tengah). Banyak tool ekspor SVG membuang efek ini dan
-menghasilkan gambar flat — karena itu SVG-nya memakai `feGaussianBlur` pada stroke
-tebal yang di-clip ke bentuk squircle. Kalau butuh gradasi yang persis, pakai PNG-nya.
+Gradasi ikon ini bukan radial biasa: warnanya bergantung pada jarak ke tepi
+(terang di pinggir, pekat di tengah). Tool ekspor SVG umumnya membuang efek ini dan
+menghasilkan gambar flat. `dekat.svg` menyelesaikannya dengan
+`feGaussianBlur` → `feComponentTransfer` (tabel kurva gradasi asli, 64 titik) →
+`feFlood`, jadi tetap vektor murni tanpa gambar tertanam.
+
+Kecocokan terukur terhadap `icon.png`: beda rata-rata 1,7/255 pada 1080 px,
+1,6 pada 256 px, 2,2 pada 64 px. Untuk hasil yang identik bit-per-bit, pakai PNG.

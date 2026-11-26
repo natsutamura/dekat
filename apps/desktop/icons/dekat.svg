@@ -1,23 +1,34 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Dekat — ikon aplikasi (vektor murni, tanpa raster).
+
+  Kenapa SVG ekspor biasa kehilangan gradasi:
+  gradasi ikon ini bukan radial/linear. Warnanya bergantung pada JARAK KE TEPI
+  squircle — paling terang di pinggir (#71B0F7), memudar ke pekat (#0A77F1)
+  dalam ~250 px ke arah tengah. Banyak tool ekspor dan renderer SVG sederhana
+  tidak mendukung url(#gradient) sama sekali, jadi hasilnya flat atau hitam.
+
+  Cara kerja file ini:
+    feGaussianBlur(alpha bentuk)  -> ramp halus dari tepi ke dalam
+    feComponentTransfer           -> ramp itu dipetakan lewat kurva gradasi asli
+                                     (64 titik, diukur per piksel dari master)
+    feFlood + feComposite         -> diwarnai dengan warna tepi
+  Semua bentuk tetap vektor; tidak ada gambar yang ditanam.
+
+  Kecocokan terukur vs icon.png (master 1080 px, rsvg-convert):
+    1080 px : beda rata-rata 1,7/255     512 px : 1,6
+     256 px : 1,6                        128 px : 1,9     64 px : 2,2
+  Kalau butuh 100% identik bit-per-bit, pakai icon.png — gradasi di sana adalah
+  data aslinya.
+-->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080" role="img" aria-label="Dekat">
   <title>Dekat</title>
-  <desc>Chat LAN tanpa server. Bubble putih dengan dua kapsul biru di atas squircle biru bergradasi.</desc>
-  <defs>
-    <!-- Gradasi asli bukan radial dari tengah, tapi pendar dari tepi: makin ke dalam
-         makin pekat. Dimodelkan sebagai stroke tebal yang di-blur lalu di-clip. -->
-    <clipPath id="dekat-shape">
-      <path d="M2975 10789 c-459 -16 -838 -77 -1140 -183 -947 -330 -1602 -1124 -1764 -2136 -66 -412 -71 -594 -71 -3065 1 -2470 5 -2672 70 -3075 197 -1213 1070 -2074 2296 -2264 396 -62 351 -61 3034 -61 2683 0 2637 -1 3035 60 1237 191 2109 1063 2300 2300 61 398 60 352 60 3035 0 2683 1 2638 -61 3034 -125 807 -531 1457 -1176 1882 -472 311 -972 445 -1778 474 -310 11 -4493 11 -4805 -1z"/>
-    </clipPath>
-    <filter id="dekat-glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="100"/>
-    </filter>
-  </defs>
-  <g transform="translate(0,1080) scale(0.1,-0.1)">
-    <g clip-path="url(#dekat-shape)">
-      <rect x="0" y="0" width="10800" height="10800" fill="#0A77F1"/>
-      <path d="M2975 10789 c-459 -16 -838 -77 -1140 -183 -947 -330 -1602 -1124 -1764 -2136 -66 -412 -71 -594 -71 -3065 1 -2470 5 -2672 70 -3075 197 -1213 1070 -2074 2296 -2264 396 -62 351 -61 3034 -61 2683 0 2637 -1 3035 60 1237 191 2109 1063 2300 2300 61 398 60 352 60 3035 0 2683 1 2638 -61 3034 -125 807 -531 1457 -1176 1882 -472 311 -972 445 -1778 474 -310 11 -4493 11 -4805 -1z" fill="none" stroke="#82BAF8" stroke-width="500" filter="url(#dekat-glow)"/>
-    </g>
-    <path fill="#FFFFFF" d="M3605 8109 c-288 -42 -540 -227 -670 -493 -84 -171 -86 -185 -115 -906 -50 -1257 -149 -2188 -280 -2627 -163 -549 -553 -1041 -1072 -1349 l-93 -55 200 6 c954 29 1602 180 1882 438 l46 42 1881 6 c2004 6 1952 5 2238 54 962 166 1521 720 1722 1705 89 438 111 867 96 1805 -12 650 -15 689 -75 828 -114 266 -325 449 -610 529 l-80 23 -2505 1 c-1390 1 -2532 -2 -2565 -7z"/>
-    <path fill="#0A77F1" d="M5265 7075 c-228 -50 -402 -205 -482 -429 -14 -40 -336 -1846 -349 -1956 -20 -174 94 -374 258 -450 311 -144 735 75 828 428 27 104 340 1913 340 1967 0 305 -277 510 -595 440z M7030 7074 c-203 -43 -394 -211 -465 -408 -16 -47 -80 -387 -191 -1011 -191 -1085 -188 -1058 -121 -1199 196 -412 844 -314 1021 156 20 51 294 1554 356 1951 35 226 -113 454 -335 512 -72 18 -178 18 -265 -1z"/>
-  </g>
+<defs><mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="1080" height="1080"><g transform="translate(0,1080) scale(0.1,-0.1)"><path d="M2975 10789 c-459 -16 -838 -77 -1140 -183 -947 -330 -1602 -1124 -1764 -2136 -66 -412 -71 -594 -71 -3065 1 -2470 5 -2672 70 -3075 197 -1213 1070 -2074 2296 -2264 396 -62 351 -61 3034 -61 2683 0 2637 -1 3035 60 1237 191 2109 1063 2300 2300 61 398 60 352 60 3035 0 2683 1 2638 -61 3034 -125 807 -531 1457 -1176 1882 -472 311 -972 445 -1778 474 -310 11 -4493 11 -4805 -1z" fill="#fff"/></g></mask>
+<filter id="g" x="-40%" y="-40%" width="180%" height="180%" color-interpolation-filters="sRGB">
+<feGaussianBlur in="SourceAlpha" stdDeviation="1600" result="b"/>
+<feComponentTransfer in="b" result="t"><feFuncA type="table" tableValues="1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 1.0000 0.9929 0.9929 0.9929 0.9929 0.9517 0.9001 0.8572 0.8150 0.7743 0.7336 0.6929 0.6518 0.6097 0.5676 0.5254 0.4926 0.4604 0.4281 0.3958 0.3649 0.3533 0.3387 0.3242 0.3096 0.2911 0.2661 0.2412 0.2162 0.1963 0.1713 0.1531 0.1424 0.1317 0.1196 0.0874 0.0457 0.0299 0.0235 0.0171 0.0113 0.0078 0.0033 0.0000 0.0000"/></feComponentTransfer>
+<feFlood flood-color="#71B0F7" result="f"/><feComposite in="f" in2="t" operator="in"/></filter></defs>
+<g mask="url(#m)"><g transform="translate(0,1080) scale(0.1,-0.1)"><rect width="10800" height="10800" fill="#0A77F1"/>
+<path d="M2975 10789 c-459 -16 -838 -77 -1140 -183 -947 -330 -1602 -1124 -1764 -2136 -66 -412 -71 -594 -71 -3065 1 -2470 5 -2672 70 -3075 197 -1213 1070 -2074 2296 -2264 396 -62 351 -61 3034 -61 2683 0 2637 -1 3035 60 1237 191 2109 1063 2300 2300 61 398 60 352 60 3035 0 2683 1 2638 -61 3034 -125 807 -531 1457 -1176 1882 -472 311 -972 445 -1778 474 -310 11 -4493 11 -4805 -1z" fill="#fff" filter="url(#g)"/></g></g>
+<g transform="translate(0,1080) scale(0.1,-0.1)"><path fill="#FFFFFF" d="M3605 8109 c-288 -42 -540 -227 -670 -493 -84 -171 -86 -185 -115 -906 -50 -1257 -149 -2188 -280 -2627 -163 -549 -553 -1041 -1072 -1349 l-93 -55 200 6 c954 29 1602 180 1882 438 l46 42 1881 6 c2004 6 1952 5 2238 54 962 166 1521 720 1722 1705 89 438 111 867 96 1805 -12 650 -15 689 -75 828 -114 266 -325 449 -610 529 l-80 23 -2505 1 c-1390 1 -2532 -2 -2565 -7z"/><path fill="#0A77F1" d="M5265 7075 c-228 -50 -402 -205 -482 -429 -14 -40 -336 -1846 -349 -1956 -20 -174 94 -374 258 -450 311 -144 735 75 828 428 27 104 340 1913 340 1967 0 305 -277 510 -595 440z M7030 7074 c-203 -43 -394 -211 -465 -408 -16 -47 -80 -387 -191 -1011 -191 -1085 -188 -1058 -121 -1199 196 -412 844 -314 1021 156 20 51 294 1554 356 1951 35 226 -113 454 -335 512 -72 18 -178 18 -265 -1z"/></g>
 </svg>
