@@ -1,4 +1,4 @@
-# Protokol LAN Chat v5 (M1 + M3 + M5 + TLS)
+# Protokol Dekat v5 (M1 + M3 + M5 + TLS)
 
 Tanpa server. Semua node setara (peer-to-peer). Angka port ada di `crates/core/src/proto.rs`.
 
@@ -30,7 +30,7 @@ Payload `Announce` (JSON, UTF-8):
 ## 2. Transport (TLS + TCP + framing)
 
 **Sejak v5 semua koneksi TCP dibungkus TLS 1.3.** Tidak ada mode plaintext kecuali
-dinyalakan manual dengan `LANCHAT_ALLOW_PLAINTEXT=1` (untuk bicara dengan build lama).
+dinyalakan manual dengan `DEKAT_ALLOW_PLAINTEXT=1` (untuk bicara dengan build lama).
 
 ### 2.1 Handshake
 
@@ -56,7 +56,7 @@ Frame = `u32 BE length` + JSON body. Batas 8 MiB. Panjang di luar `1..=8 MiB` �
 Sertifikat hanya menyediakan **kunci sesi**, bukan identitas. Verifikator sengaja
 menerima sertifikat apa pun (`AcceptAnyCert`). Identitas dibuktikan di langkah `auth`:
 
-1. Kedua ujung memanggil `export_keying_material(label="EXPORTER-lanchat-channel-v1", 32 byte)`.
+1. Kedua ujung memanggil `export_keying_material(label="EXPORTER-dekat-channel-v1", 32 byte)`.
    Nilai ini diturunkan dari rahasia sesi TLS → **hanya diketahui kedua ujung**.
 2. Tiap sisi menandatangani `HELLO_CTX ‖ exporter ‖ 0 ‖ min(id_a,id_b) ‖ 0 ‖ max(id_a,id_b)`
    dengan kunci Ed25519-nya, lalu mengirim `Auth{pk, sig}`.

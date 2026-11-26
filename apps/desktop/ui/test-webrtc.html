@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="utf-8">
-<title>LAN Chat — uji WebRTC</title>
+<title>Dekat — uji WebRTC</title>
 <link rel="stylesheet" href="styles.css">
 <style>
   body{overflow:auto;padding:16px;background:#0f1115;color:#eee}
@@ -41,7 +41,7 @@
 (() => {
   const me = new URLSearchParams(location.search).get("me") || "a";
   const other = me === "a" ? "b" : "a";
-  const ch = new BroadcastChannel("lanchat-call-test");
+  const ch = new BroadcastChannel("dekat-call-test");
   const listeners = {};
   window.__PEER = me;
   window.__OTHER = other;
@@ -130,7 +130,7 @@ function log(msg, cls) {
       if (ev === "lc://call-incoming") {
         const wrapped = async (e) => {
           await cb(e);
-          setTimeout(() => window.LanChatCall.acceptCall(), 250);
+          setTimeout(() => window.DekatCall.acceptCall(), 250);
         };
         return origListen(ev, wrapped);
       }
@@ -138,7 +138,7 @@ function log(msg, cls) {
     };
   }
 
-  await window.LanChatCall.init();
+  await window.DekatCall.init();
   window.__READY = true;
   log("ready sebagai peer " + window.__PEER);
 })();

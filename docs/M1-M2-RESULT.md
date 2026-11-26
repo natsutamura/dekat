@@ -65,7 +65,7 @@ dengan nama pengirim di atas bubble untuk grup.
 2. **Nama pengirim jadi flex-item di samping bubble** (bukan di atasnya) — perbaikan: wrapper
    `.stack` di dalam `.row`.
 3. **Toast zoom menumpuk** setiap penekanan tombol — perbaikan: toast ber-`data-key` di-reuse.
-4. **`cargo build` gagal karena path `lanchat-core`** (`../core` → `../../crates/core`).
+4. **`cargo build` gagal karena path `dekat-core`** (`../core` → `../../crates/core`).
 5. **Icon PNG harus RGBA** — `icon.png` awal 16-bit tanpa alpha; dibuat ulang dengan `PNG32`.
 6. **`borrow of moved value`** di handler `Event::Typing` — `from.clone()`.
 7. **Frame `hello` hanya dikirim sisi dialer** (bug M0 yang baru ketahuan di uji M0) — sekarang
@@ -83,12 +83,12 @@ dengan nama pengirim di atas bubble untuk grup.
 ## 5. Build release
 
 ```
-cargo build --release -p lanchat-desktop   → 16m 17s
-target/release/lanchat-desktop             → 5.6 MB
+cargo build --release -p dekat-desktop   → 16m 17s
+target/release/dekat-desktop             → 5.6 MB
 ```
 
 Binary release diuji ulang dengan skrip E2E yang sama (bukan cuma compile):
-`BIN=target/release/lanchat-desktop bash scripts/e2e-ui.sh` → chat dua arah + ✓✓ OK.
+`BIN=target/release/dekat-desktop bash scripts/e2e-ui.sh` → chat dua arah + ✓✓ OK.
 
 ## 6. Tangkapan layar dari app nyata
 

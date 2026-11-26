@@ -4,7 +4,7 @@
 //! Tidak butuh jaringan luar — semua lewat loopback.
 
 use base64::Engine as _;
-use lanchat_core::{Config, Event, Node};
+use dekat_core::{Config, Event, Node};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
@@ -16,7 +16,7 @@ fn tmp_dir(tag: &str) -> PathBuf {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static N: AtomicUsize = AtomicUsize::new(0);
     let n = N.fetch_add(1, Ordering::SeqCst);
-    let p = std::env::temp_dir().join(format!("lanchat-it-{}-{}-{}", tag, std::process::id(), n));
+    let p = std::env::temp_dir().join(format!("dekat-it-{}-{}-{}", tag, std::process::id(), n));
     let _ = std::fs::remove_dir_all(&p);
     std::fs::create_dir_all(&p).unwrap();
     p
@@ -90,7 +90,7 @@ async fn pesan_grup_sampai_ke_anggota() {
 
     let (room, _msg) = a.send_group(&members, "halo grup").unwrap();
     assert!(room.starts_with('#'));
-    assert_eq!(room, lanchat_core::room_id(&members));
+    assert_eq!(room, dekat_core::room_id(&members));
 
     let (body, to) = timeout(Duration::from_secs(5), async {
         loop {
@@ -171,7 +171,7 @@ async fn kirim_file_sampai_dan_utuh() {
     let (a, b) = pair().await;
 
     // file sumber 300 KB di dir A
-    let dir_a = std::env::temp_dir().join(format!("lanchat-sendfile-{}", std::process::id()));
+    let dir_a = std::env::temp_dir().join(format!("dekat-sendfile-{}", std::process::id()));
     std::fs::create_dir_all(&dir_a).unwrap();
     let src = dir_a.join("dokumen.bin");
     {
@@ -179,7 +179,7 @@ async fn kirim_file_sampai_dan_utuh() {
         let data: Vec<u8> = (0..300 * 1024).map(|i| (i % 253) as u8).collect();
         f.write_all(&data).unwrap();
     }
-    let expected = lanchat_core::files::sha256_file(&src).unwrap();
+    let expected = dekat_core::files::sha256_file(&src).unwrap();
 
     let mut ev_b = b.subscribe();
     let a2 = a.clone();
@@ -200,7 +200,7 @@ async fn kirim_file_sampai_dan_utuh() {
 
     let (path, name) = received_path;
     assert_eq!(name, "dokumen.bin");
-    assert_eq!(lanchat_core::files::sha256_file(std::path::Path::new(&path)).unwrap(), expected);
+    assert_eq!(dekat_core::files::sha256_file(std::path::Path::new(&path)).unwrap(), expected);
     assert_eq!(std::fs::metadata(&path).unwrap().len(), 300 * 1024);
 
     let msg_id = timeout(Duration::from_secs(20), send).await.unwrap().unwrap();
@@ -211,7 +211,7 @@ async fn kirim_file_sampai_dan_utuh() {
 #[tokio::test]
 async fn kirim_file_tanpa_koneksi_gagal_dengan_jelas() {
     let (a, _b) = pair().await;
-    let src = std::env::temp_dir().join(format!("lanchat-nofile-{}.bin", std::process::id()));
+    let src = std::env::temp_dir().join(format!("dekat-nofile-{}.bin", std::process::id()));
     std::fs::write(&src, b"isi").unwrap();
     let err = a.send_file("peer-yang-tidak-ada", &src, 1).await.unwrap_err();
     assert!(err.to_string().contains("koneksi"), "pesan error: {err}");
@@ -467,7 +467,7 @@ async fn verified_tidak_turun_oleh_announce() {
 /// dari sesi lain — harus ditolak.
 #[tokio::test]
 async fn tanda_tangan_tidak_bisa_dipakai_ulang_di_sesi_lain() {
-    use lanchat_core::identity::Identity;
+    use dekat_core::identity::Identity;
 
     // Dua identitas nyata.
     let dir_a = tmp_dir("id-a");
@@ -477,11 +477,11 @@ async fn tanda_tangan_tidak_bisa_dipakai_ulang_di_sesi_lain() {
 
     // Sesi 1: A↔B (exporter asli).
     let ex1 = [1u8; 32];
-    let msg1 = lanchat_core::tls::hello_msg(&ex1, &ia.id(), &ib.id());
+    let msg1 = dekat_core::tls::hello_msg(&ex1, &ia.id(), &ib.id());
 
     // Sesi 2: sesi lain (exporter berbeda) antara pasangan yang sama.
     let ex2 = [2u8; 32];
-    let msg2 = lanchat_core::tls::hello_msg(&ex2, &ia.id(), &ib.id());
+    let msg2 = dekat_core::tls::hello_msg(&ex2, &ia.id(), &ib.id());
 
     let sig_sesi1 = ia.sign_hex(&msg1);
 
@@ -693,7 +693,7 @@ async fn kirim_file_ke_dua_peer_sekaligus() {
     let src = tmp_dir("kirim").join("grup.bin");
     let isi: Vec<u8> = (0..200_000).map(|i| (i % 253) as u8).collect();
     std::fs::write(&src, &isi).unwrap();
-    let sha = lanchat_core::files::sha256_file(&src).unwrap();
+    let sha = dekat_core::files::sha256_file(&src).unwrap();
 
     let targets = vec![b.id().to_string(), c.id().to_string()];
     let id = a.send_file_many(&targets, &src, 30).await.expect("kirim ke dua peer gagal");
@@ -707,7 +707,7 @@ async fn kirim_file_ke_dua_peer_sekaligus() {
             if let Ok(rd) = std::fs::read_dir(&dir) {
                 for e in rd.flatten() {
                     if e.path().extension().and_then(|x| x.to_str()) == Some("bin") {
-                        if lanchat_core::files::sha256_file(&e.path()).unwrap_or_default() == sha {
+                        if dekat_core::files::sha256_file(&e.path()).unwrap_or_default() == sha {
                             found = true;
                         }
                     }
@@ -726,12 +726,12 @@ async fn kirim_file_ke_dua_peer_sekaligus() {
 /// tengah koneksi nyata tidak deterministik.
 #[tokio::test]
 async fn resume_transfer_melanjutkan_dari_posisi_terakhir() {
-    use lanchat_core::files::FileTransfer;
+    use dekat_core::files::FileTransfer;
 
     let dir = tmp_dir("resume");
-    let chunk = lanchat_core::proto::FILE_CHUNK_BYTES;
+    let chunk = dekat_core::proto::FILE_CHUNK_BYTES;
     let isi: Vec<u8> = (0..chunk * 4).map(|i| (i % 241) as u8).collect();
-    let sha = lanchat_core::files::sha256_file_bytes(&isi);
+    let sha = dekat_core::files::sha256_file_bytes(&isi);
 
     // Penerima sudah punya 2 potongan pertama dari percobaan sebelumnya.
     let pdir = dir.join("partial");
@@ -753,7 +753,7 @@ async fn resume_transfer_melanjutkan_dari_posisi_terakhir() {
         done = ft.write_chunk("baru", idx, &b64).unwrap();
     }
     let (path, _) = done.expect("transfer harus selesai");
-    assert_eq!(lanchat_core::files::sha256_file(&path).unwrap(), sha, "hasil resume harus utuh");
+    assert_eq!(dekat_core::files::sha256_file(&path).unwrap(), sha, "hasil resume harus utuh");
 }
 
 // ---------------- regresi: nama grup & bug grup ----------------

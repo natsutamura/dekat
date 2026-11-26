@@ -2,10 +2,10 @@
 # E2E: kirim PNG asli lewat dialog GUI → harus tampil inline (bukan kartu file).
 set -u
 export DISPLAY=:11 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1
-BIN=${BIN:-/root/lanchat/target/debug/lanchat-desktop}
+BIN=${BIN:-/root/dekat/target/debug/dekat-desktop}
 OUT=/tmp/e2e-img
 rm -rf $OUT /root/.lc-i-ray /root/.lc-i-iphone; mkdir -p $OUT
-pkill -9 -x lanchat-desktop 2>/dev/null; sleep 2
+pkill -9 -x dekat-desktop 2>/dev/null; sleep 2
 
 # PNG asli 640x400 dengan gradien + teks, biar kelihatan jelas di screenshot
 convert -size 640x400 gradient:'#0a84ff-#30d158' \
@@ -14,11 +14,11 @@ convert -size 640x400 gradient:'#0a84ff-#30d158' \
 identify $OUT/foto-liburan.png
 SHA=$(sha256sum $OUT/foto-liburan.png | cut -d' ' -f1)
 
-LANCHAT_NAME=ray LANCHAT_PORT=42601 LANCHAT_DIR=/root/.lc-i-ray setsid nohup "$BIN" >/tmp/lc-i-ray.log 2>&1 &
-LANCHAT_NAME=iphone LANCHAT_PORT=42602 LANCHAT_DIR=/root/.lc-i-iphone setsid nohup "$BIN" >/tmp/lc-i-iphone.log 2>&1 &
+DEKAT_NAME=ray DEKAT_PORT=42601 DEKAT_DIR=/root/.lc-i-ray setsid nohup "$BIN" >/tmp/lc-i-ray.log 2>&1 &
+DEKAT_NAME=iphone DEKAT_PORT=42602 DEKAT_DIR=/root/.lc-i-iphone setsid nohup "$BIN" >/tmp/lc-i-iphone.log 2>&1 &
 
 for i in $(seq 1 30); do
-  RAY=$(xdotool search --name "LAN Chat — ray" 2>/dev/null | head -1)
+  RAY=$(xdotool search --name "Dekat — ray" 2>/dev/null | head -1)
   [ -n "${RAY:-}" ] && break
   sleep 1
 done
@@ -38,7 +38,7 @@ xdotool key --clearmodifiers Return; sleep 5
 import -window $RAY $OUT/01-ray-sent.png
 
 # penerima: buka thread, screenshot
-IPH=$(xdotool search --name "LAN Chat — iphone" | head -1)
+IPH=$(xdotool search --name "Dekat — iphone" | head -1)
 xdotool windowsize $IPH 900 600; xdotool windowmove $IPH 930 30; sleep 2
 xdotool windowactivate --sync $IPH; sleep 1
 xdotool mousemove --window $IPH 120 151 click 1; sleep 3

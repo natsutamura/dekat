@@ -3,21 +3,21 @@
 # Bukti diambil dari SQLite kedua instance + sha256 file yang benar-benar diterima.
 set -u
 export DISPLAY=:11 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1
-BIN=${BIN:-/root/lanchat/target/debug/lanchat-desktop}
+BIN=${BIN:-/root/dekat/target/debug/dekat-desktop}
 OUT=/tmp/e2e-file-ui
 rm -rf $OUT /root/.lc-f-ray /root/.lc-f-iphone; mkdir -p $OUT
 
-pkill -9 -x lanchat-desktop 2>/dev/null; sleep 2
+pkill -9 -x dekat-desktop 2>/dev/null; sleep 2
 
 head -c 900000 /dev/urandom > $OUT/foto-liburan.bin
 SHA_SRC=$(sha256sum $OUT/foto-liburan.bin | cut -d' ' -f1)
 echo "sha sumber: $SHA_SRC"
 
-LANCHAT_NAME=ray LANCHAT_PORT=42301 LANCHAT_DIR=/root/.lc-f-ray setsid nohup "$BIN" >/tmp/lc-f-ray.log 2>&1 &
-LANCHAT_NAME=iphone LANCHAT_PORT=42302 LANCHAT_DIR=/root/.lc-f-iphone setsid nohup "$BIN" >/tmp/lc-f-iphone.log 2>&1 &
+DEKAT_NAME=ray DEKAT_PORT=42301 DEKAT_DIR=/root/.lc-f-ray setsid nohup "$BIN" >/tmp/lc-f-ray.log 2>&1 &
+DEKAT_NAME=iphone DEKAT_PORT=42302 DEKAT_DIR=/root/.lc-f-iphone setsid nohup "$BIN" >/tmp/lc-f-iphone.log 2>&1 &
 
 for i in $(seq 1 30); do
-  RAY=$(xdotool search --name "LAN Chat — ray" 2>/dev/null | head -1)
+  RAY=$(xdotool search --name "Dekat — ray" 2>/dev/null | head -1)
   [ -n "${RAY:-}" ] && break
   sleep 1
 done
@@ -45,7 +45,7 @@ sleep 3
 echo "=== DB ray (pengirim) ==="
 python3 -c "
 import sqlite3
-c=sqlite3.connect('/root/.lc-f-ray/lanchat.db',timeout=5)
+c=sqlite3.connect('/root/.lc-f-ray/dekat.db',timeout=5)
 print('threads:', c.execute('select id,kind,name from threads').fetchall())
 print('msgs:', c.execute('select id,from_name,mine,body from messages').fetchall())
 print('att:', c.execute('select msg_id,file_name,file_size,file_path,sha256 from attachments').fetchall())
@@ -53,7 +53,7 @@ print('att:', c.execute('select msg_id,file_name,file_size,file_path,sha256 from
 echo "=== DB iphone (penerima) ==="
 python3 -c "
 import sqlite3
-c=sqlite3.connect('/root/.lc-f-iphone/lanchat.db',timeout=5)
+c=sqlite3.connect('/root/.lc-f-iphone/dekat.db',timeout=5)
 print('threads:', c.execute('select id,kind,name,preview from threads').fetchall())
 print('msgs:', c.execute('select id,from_name,mine,body from messages').fetchall())
 print('att:', c.execute('select msg_id,file_name,file_size,file_path,sha256 from attachments').fetchall())

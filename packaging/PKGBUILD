@@ -5,12 +5,12 @@
 # bukan mengompilasi ulang — build Tauri butuh WebKitGTK 4.1 dan memakan
 # 15+ menit. Kalau kamu mau kompilasi sendiri, ganti source=() dengan repo git
 # dan isi build()/package() dengan `cargo build --release`.
-pkgname=lanchat-bin
+pkgname=dekat-bin
 pkgver=0.2.0
 pkgrel=1
 pkgdesc="Chat, kirim file, dan panggilan suara peer-to-peer di jaringan lokal (tanpa server)"
 arch=('x86_64')
-url="https://github.com/natsutamura/lanchat"
+url="https://github.com/natsutamura/dekat"
 license=('MIT')
 depends=(
   'webkit2gtk-4.1'
@@ -19,18 +19,18 @@ depends=(
   'librsvg'
   'hicolor-icon-theme'
 )
-provides=('lanchat')
-conflicts=('lanchat')
+provides=('dekat')
+conflicts=('dekat')
 options=('!strip')   # binary sudah di-strip oleh profil release
 
-source=("https://github.com/natsutamura/lanchat/releases/download/v${pkgver}/lanchat-${pkgver}-linux-x64.tar.gz")
+source=("https://github.com/natsutamura/dekat/releases/download/v${pkgver}/dekat-${pkgver}-linux-x64.tar.gz")
 sha256sums=('cedfa19c81d1799616433375aa964f2dedc8171fc19f991903087e241ce52e43')
 
 package() {
-  install -Dm755 "${srcdir}/lanchat-${pkgver}-linux-x64/usr/bin/lanchat" \
-    "${pkgdir}/usr/bin/lanchat"
-  install -Dm644 "${srcdir}/lanchat-${pkgver}-linux-x64/usr/share/applications/lanchat.desktop" \
-    "${pkgdir}/usr/share/applications/lanchat.desktop"
-  install -Dm644 "${srcdir}/lanchat-${pkgver}-linux-x64/usr/share/icons/hicolor/512x512/apps/lanchat.png" \
-    "${pkgdir}/usr/share/icons/hicolor/512x512/apps/lanchat.png"
+  install -Dm755 "${srcdir}/dekat-${pkgver}-linux-x64/usr/bin/dekat" \
+    "${pkgdir}/usr/bin/dekat"
+  install -Dm644 "${srcdir}/dekat-${pkgver}-linux-x64/usr/share/applications/dekat.desktop" \
+    "${pkgdir}/usr/share/applications/dekat.desktop"
+  install -Dm644 "${srcdir}/dekat-${pkgver}-linux-x64/usr/share/icons/hicolor/512x512/apps/dekat.png" \
+    "${pkgdir}/usr/share/icons/hicolor/512x512/apps/dekat.png"
 }

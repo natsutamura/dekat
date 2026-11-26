@@ -1,6 +1,6 @@
 //! Penyimpanan lokal (SQLite): pesan, thread, setting.
 //!
-//! Satu file DB per profil (`<data_dir>/lanchat.db`). UI tidak pernah menyentuh SQL
+//! Satu file DB per profil (`<data_dir>/dekat.db`). UI tidak pernah menyentuh SQL
 //! langsung — semua lewat API ini supaya versi schema gampang dimigrasi.
 
 use anyhow::{Context, Result};
@@ -546,7 +546,7 @@ mod tests {
         }).unwrap();
 
         // dua file nyata di disk
-        let dir = std::env::temp_dir().join(format!("lanchat-clear-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dekat-clear-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let f1 = dir.join("a.txt");

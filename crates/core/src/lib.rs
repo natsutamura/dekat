@@ -1,4 +1,4 @@
-//! lanchat-core — inti dari LAN Chat
+//! dekat-core — inti dari Dekat
 //!
 //! Modul:
 //! * [`proto`]     — tipe wire (announce + frame) & framing TCP

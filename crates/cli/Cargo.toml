@@ -1,15 +1,15 @@
 [package]
-name = "lanchat-cli"
+name = "dekat-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "lanchat"
+name = "dekat"
 path = "src/main.rs"
 
 [dependencies]
-lanchat-core = { path = "../core" }
+dekat-core = { path = "../core" }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }

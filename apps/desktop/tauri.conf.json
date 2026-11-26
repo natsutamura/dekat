@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "LAN Chat",
+  "productName": "Dekat",
   "version": "0.2.0",
-  "identifier": "id.vuelabs.lanchat",
+  "identifier": "id.vuelabs.dekat",
   "build": {
     "frontendDist": "ui"
   },
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "LAN Chat",
+        "title": "Dekat",
         "width": 1080,
         "height": 680,
         "minWidth": 720,

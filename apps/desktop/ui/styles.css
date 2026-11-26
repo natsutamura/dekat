@@ -1,4 +1,4 @@
-/* LAN Chat — tema iMessage. Semua warna lewat CSS variable biar gampang ganti tema. */
+/* Dekat — tema iMessage. Semua warna lewat CSS variable biar gampang ganti tema. */
 :root{
   --bg-window:#fff; --bg-sidebar:#f4f4f5; --bg-header:rgba(255,255,255,.88);
   --bg-bubble-out:#0b84ff; --fg-bubble-out:#fff;

@@ -896,6 +896,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "dekat-cli"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "dekat-core",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "dekat-core"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "ed25519-dalek",
+ "hex",
+ "rand 0.8.8",
+ "rcgen",
+ "rusqlite",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+]
+
+[[package]]
+name = "dekat-desktop"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "base64 0.23.1",
+ "dekat-core",
+ "png",
+ "qrcode",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tokio",
+]
+
+[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2347,60 +2401,6 @@ checksum = "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d"
 dependencies = [
  "bitflags 2.13.2",
  "serde",
-]
-
-[[package]]
-name = "lanchat-cli"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "lanchat-core",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "lanchat-core"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "base64 0.23.1",
- "ed25519-dalek",
- "hex",
- "rand 0.8.8",
- "rcgen",
- "rusqlite",
- "rustls",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "socket2 0.5.10",
- "tokio",
- "tokio-rustls",
- "tracing",
-]
-
-[[package]]
-name = "lanchat-desktop"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "arboard",
- "base64 0.23.1",
- "lanchat-core",
- "png",
- "qrcode",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tokio",
 ]
 
 [[package]]

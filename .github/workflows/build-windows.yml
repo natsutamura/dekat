@@ -47,8 +47,8 @@ jobs:
           $msi = Get-ChildItem -Recurse -Filter *.msi target | Select-Object -First 1
           $nsis = Get-ChildItem -Recurse -Filter *-setup.exe target | Select-Object -First 1
           if (-not $msi) { throw "MSI tidak dihasilkan" }
-          Copy-Item $msi.FullName "dist/LANChat-$($msi.Name -replace '.*_','')"
-          if ($nsis) { Copy-Item $nsis.FullName "dist/LANChat-setup.exe" }
+          Copy-Item $msi.FullName "dist/Dekat-$($msi.Name -replace '.*_','')"
+          if ($nsis) { Copy-Item $nsis.FullName "dist/Dekat-setup.exe" }
           Copy-Item README.md dist/README.md
           Get-ChildItem dist | Select-Object Name, Length
           $mb = [math]::Round($msi.Length / 1MB, 2)
@@ -57,7 +57,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LANChat-windows-installer
+          name: Dekat-windows-installer
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -65,7 +65,7 @@ jobs:
       - name: Ringkasan
         shell: pwsh
         run: |
-          Add-Content $env:GITHUB_STEP_SUMMARY "## LAN Chat untuk Windows"
+          Add-Content $env:GITHUB_STEP_SUMMARY "## Dekat untuk Windows"
           Add-Content $env:GITHUB_STEP_SUMMARY ""
           Add-Content $env:GITHUB_STEP_SUMMARY "- Installer MSI: $env:UKURAN_MSI"
-          Add-Content $env:GITHUB_STEP_SUMMARY "- Artefak: ``LANChat-windows-installer``"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Artefak: ``Dekat-windows-installer``"

@@ -1,4 +1,4 @@
-/* LAN Chat — frontend Tauri. Semua data lewat invoke(); event dari Rust lewat listen(). */
+/* Dekat — frontend Tauri. Semua data lewat invoke(); event dari Rust lewat listen(). */
 const T = window.__TAURI__ || {};
 const invoke = T.core ? T.core.invoke : async () => { throw new Error("Tauri API tidak tersedia"); };
 const listen = T.event ? T.event.listen : async () => () => {};
@@ -15,7 +15,7 @@ const S = {
   filter: "",
 };
 
-function baseTitle() { return "LAN Chat" + (S.me ? " — " + S.me.name : ""); }
+function baseTitle() { return "Dekat" + (S.me ? " — " + S.me.name : ""); }
 
 const STATUS_LABEL = { online: "Online", idle: "Idle", dnd: "Do Not Disturb" };
 /* Emoji per kategori, bukan satu baris panjang. Dipakai emoji picker. */
@@ -677,7 +677,7 @@ async function pairingModal() {
     <div class="pair-uri" id="pair-uri">${escapeAttr(p.uri)}</div>
     <label class="field" style="margin-top:10px">
       <span>Kode perangkat lain</span>
-      <input type="text" id="pair-input" placeholder="lanchat://192.168.1.5:41234" autocomplete="off">
+      <input type="text" id="pair-input" placeholder="dekat://192.168.1.5:41234" autocomplete="off">
     </label>
     <div class="hint" id="pair-hint">Keduanya harus di WiFi/LAN yang sama.</div>
     <div class="actions">
@@ -1090,7 +1090,7 @@ async function boot() {
     const online = ids.filter((id) => S.peers.some((p) => p.id === id && p.online));
     if (!online.length) return toast("Tidak ada yang online", "Peer harus online untuk dipanggil");
 
-    window.LanChatCall.startCall(online, t.name);
+    window.DekatCall.startCall(online, t.name);
   };
   $("btn-info").onclick = (e) => {
     const t = S.threads.find((x) => x.id === S.active);
@@ -1209,12 +1209,12 @@ async function boot() {
   window.addEventListener("focus", () => { document.title = baseTitle(); });
 
   // voice call
-  if (window.LanChatCall) {
+  if (window.DekatCall) {
     // Beri call.js cara menerjemahkan peer id → nama tampilan.
-    window.LanChatCall.setNameResolver(
+    window.DekatCall.setNameResolver(
       (id) => (S.peers.find((p) => p.id === id) || {}).name || String(id).slice(0, 6)
     );
-    await window.LanChatCall.init();
+    await window.DekatCall.init();
   }
 
   // buka thread terakhir kalau ada

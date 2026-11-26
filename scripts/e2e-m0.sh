@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# E2E M0: dua instance lanchat di satu host, cek discovery + chat 2 arah.
+# E2E M0: dua instance dekat di satu host, cek discovery + chat 2 arah.
 set -u
-cd /root/lanchat || exit 1
-BIN=./target/debug/lanchat
+cd /root/dekat || exit 1
+BIN=./target/debug/dekat
 rm -rf /tmp/lc-a /tmp/lc-b /tmp/a.in /tmp/b.in /tmp/a.log /tmp/b.log
 mkfifo /tmp/a.in /tmp/b.in
 

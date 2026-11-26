@@ -43,8 +43,8 @@ Object.defineProperty(navigator, "mediaDevices", {
 <script>
 window.__ready = false;
 (async () => {
-  window.LanChatCall.setNameResolver((id) => "nama-" + id);
-  await window.LanChatCall.init();
+  window.DekatCall.setNameResolver((id) => "nama-" + id);
+  await window.DekatCall.init();
   window.__ready = true;
 })();
 </script>

@@ -456,7 +456,7 @@ mod tests {
 
     fn tmpdir(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
-            "lanchat-ft-{}-{}-{:?}",
+            "dekat-ft-{}-{}-{:?}",
             tag,
             std::process::id(),
             std::thread::current().id()
@@ -659,7 +659,7 @@ mod tests {
     
     #[test]
     fn resume_lanjut_dari_partial() {
-        let dir = std::env::temp_dir().join(format!("lanchat-resume-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dekat-resume-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn partial_tidak_valid_diabaikan() {
-        let dir = std::env::temp_dir().join(format!("lanchat-resume-bad-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dekat-resume-bad-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let chunk = crate::proto::FILE_CHUNK_BYTES;

@@ -74,12 +74,12 @@
     call_end: () => null,
     open_path: () => null,
     pairing_qr: async () => ({
-      uri: "lanchat://192.168.1.5:41234",
+      uri: "dekat://192.168.1.5:41234",
       ip: "192.168.1.5",
       port: 41234,
       svg: '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220"><rect width="220" height="220" fill="#fff"/><rect x="20" y="20" width="60" height="60" fill="#000"/><rect x="140" y="20" width="60" height="60" fill="#000"/><rect x="20" y="140" width="60" height="60" fill="#000"/></svg>',
     }),
-    add_peer_uri: async (a) => a.uri.replace("lanchat://", ""),
+    add_peer_uri: async (a) => a.uri.replace("dekat://", ""),
     peers: async () => [],
     read_image: () => "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAAOklEQVR4nO3BMQEAAADCoPVPbQ0PoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAvg0hAAABmmDh1QAAAABJRU5ErkJggg==",
   };

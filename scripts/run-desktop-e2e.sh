@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 # Menjalankan dua instance app desktop di display :11 untuk uji E2E (Linux, satu host).
 set -u
-cd /root/lanchat || exit 1
-pkill -x lanchat-desktop 2>/dev/null
+cd /root/dekat || exit 1
+pkill -x dekat-desktop 2>/dev/null
 sleep 1
-rm -rf /root/.lanchat-ray /root/.lanchat-iphone
+rm -rf /root/.dekat-ray /root/.dekat-iphone
 
 export DISPLAY=:11
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
 export WEBKIT_DISABLE_COMPOSITING_MODE=1
 export LIBGL_ALWAYS_SOFTWARE=1
 
-LANCHAT_NAME=ray LANCHAT_PORT=42101 LANCHAT_DIR=/root/.lanchat-ray \
-  ./target/debug/lanchat-desktop >/tmp/app-ray.log 2>&1 &
-LANCHAT_NAME=iphone LANCHAT_PORT=42102 LANCHAT_DIR=/root/.lanchat-iphone \
-  ./target/debug/lanchat-desktop >/tmp/app-iphone.log 2>&1 &
+DEKAT_NAME=ray DEKAT_PORT=42101 DEKAT_DIR=/root/.dekat-ray \
+  ./target/debug/dekat-desktop >/tmp/app-ray.log 2>&1 &
+DEKAT_NAME=iphone DEKAT_PORT=42102 DEKAT_DIR=/root/.dekat-iphone \
+  ./target/debug/dekat-desktop >/tmp/app-iphone.log 2>&1 &
 
 sleep 8
-xdotool search --name "LAN Chat" > /tmp/wins.txt 2>/dev/null
+xdotool search --name "Dekat" > /tmp/wins.txt 2>/dev/null
 echo "windows:"; cat /tmp/wins.txt
 mapfile -t W < /tmp/wins.txt
 if [ "${#W[@]}" -ge 2 ]; then

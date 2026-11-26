@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn id_is_stable_across_reload() {
-        let dir = std::env::temp_dir().join(format!("lanchat-id-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dekat-id-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let a = Identity::load_or_create(&dir, "ray").unwrap();
         let b = Identity::load_or_create(&dir, "ray").unwrap();

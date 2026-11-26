@@ -34,11 +34,11 @@ use tokio_rustls::{
 
 /// Label exporter. Nilai ini ikut jadi bagian dari material kunci TLS,
 /// jadi mengubahnya = memutus kompatibilitas.
-const EXPORTER_LABEL: &[u8] = b"EXPORTER-lanchat-channel-v1";
+const EXPORTER_LABEL: &[u8] = b"EXPORTER-dekat-channel-v1";
 const EXPORTER_LEN: usize = 32;
 
 /// Konteks tanda tangan hello.
-pub const HELLO_CTX: &[u8] = b"lanchat-hello-v1";
+pub const HELLO_CTX: &[u8] = b"dekat-hello-v1";
 
 /// Konfigurasi TLS siap pakai untuk satu node.
 #[derive(Clone)]
@@ -57,7 +57,7 @@ fn load_or_create_cert(dir: &Path) -> Result<(CertificateDer<'static>, PrivateKe
     let key_path = tls_dir.join("key.pem");
 
     if !(cert_path.exists() && key_path.exists()) {
-        let cert = rcgen::generate_simple_self_signed(vec!["lanchat.local".to_string()])
+        let cert = rcgen::generate_simple_self_signed(vec!["dekat.local".to_string()])
             .map_err(|e| anyhow!("gagal buat sertifikat: {e}"))?;
         fs::write(&cert_path, cert.cert.pem())?;
         fs::write(&key_path, cert.signing_key.serialize_pem())?;
@@ -176,7 +176,7 @@ impl Tls {
     /// Bungkus koneksi TCP keluar dengan TLS.
     pub async fn connect(&self, stream: tokio::net::TcpStream) -> Result<tokio_rustls::client::TlsStream<tokio::net::TcpStream>> {
         // SNI apa pun boleh: sertifikat tidak dipakai untuk memutuskan kepercayaan.
-        let name = ServerName::try_from("lanchat.local").map_err(|e| anyhow!("server name: {e}"))?;
+        let name = ServerName::try_from("dekat.local").map_err(|e| anyhow!("server name: {e}"))?;
         self.connector
             .connect(name, stream)
             .await
@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn sertifikat_dibuat_dan_dimuat_ulang() {
-        let dir = std::env::temp_dir().join(format!("lanchat-tls-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dekat-tls-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let a = Tls::init(&dir).unwrap();
         let b = Tls::init(&dir).unwrap();

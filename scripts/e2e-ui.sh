@@ -6,7 +6,7 @@ export DISPLAY=:11
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
 export WEBKIT_DISABLE_COMPOSITING_MODE=1
 export LIBGL_ALWAYS_SOFTWARE=1
-BIN=${BIN:-/root/lanchat/target/debug/lanchat-desktop}
+BIN=${BIN:-/root/dekat/target/debug/dekat-desktop}
 
 # Aktifkan window dan PASTIKAN fokus benar sebelum mengetik.
 # xdotool type mengirim ke window yang fokus, jadi kalau aktivasi gagal,
@@ -26,19 +26,19 @@ focus_win() {
 OUT=/tmp/e2e-ui
 rm -rf $OUT; mkdir -p $OUT
 
-pkill -9 -x lanchat-desktop 2>/dev/null
+pkill -9 -x dekat-desktop 2>/dev/null
 sleep 2
-rm -rf /root/.lanchat-ray /root/.lanchat-iphone
+rm -rf /root/.dekat-ray /root/.dekat-iphone
 
-LANCHAT_NAME=ray LANCHAT_PORT=42171 LANCHAT_DIR=/root/.lanchat-ray \
+DEKAT_NAME=ray DEKAT_PORT=42171 DEKAT_DIR=/root/.dekat-ray \
   setsid nohup "$BIN" >/tmp/app-ray.log 2>&1 &
-LANCHAT_NAME=iphone LANCHAT_PORT=42172 LANCHAT_DIR=/root/.lanchat-iphone \
+DEKAT_NAME=iphone DEKAT_PORT=42172 DEKAT_DIR=/root/.dekat-iphone \
   setsid nohup "$BIN" >/tmp/app-iphone.log 2>&1 &
 
 # tunggu window muncul
 for i in $(seq 1 30); do
-  RAY=$(xdotool search --name "LAN Chat — ray" 2>/dev/null | head -1)
-  IPH=$(xdotool search --name "LAN Chat — iphone" 2>/dev/null | head -1)
+  RAY=$(xdotool search --name "Dekat — ray" 2>/dev/null | head -1)
+  IPH=$(xdotool search --name "Dekat — iphone" 2>/dev/null | head -1)
   [ -n "${RAY:-}" ] && [ -n "${IPH:-}" ] && break
   sleep 1
 done
@@ -96,7 +96,7 @@ python3 - <<'PY'
 import sqlite3
 for d in ("ray","iphone"):
     try:
-        c=sqlite3.connect(f"/root/.lanchat-{d}/lanchat.db", timeout=3)
+        c=sqlite3.connect(f"/root/.dekat-{d}/dekat.db", timeout=3)
         print(d, "threads:", c.execute("select id,kind,name,unread from threads").fetchall())
         print(d, "msgs:", c.execute("select from_name,body,mine,delivered from messages order by ts").fetchall())
         print(d, "scale:", c.execute("select v from settings where k='scale'").fetchall())

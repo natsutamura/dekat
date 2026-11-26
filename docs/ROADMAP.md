@@ -7,14 +7,14 @@ Target: LAN chat rasa iMessage, Rust di core, ringan, jalan di Windows/Linux/And
 **Rekomendasi: Tauri v2 + web UI (HTML/CSS/JS ringan, tanpa framework berat).**
 
 Alasan:
-- Core Rust yang sudah ada dipakai apa adanya (`lanchat-core` → command Tauri).
+- Core Rust yang sudah ada dipakai apa adanya (`dekat-core` → command Tauri).
 - Bubble/tema/animasi paling cepat dicapai dengan CSS; dark/light cuma ganti variabel.
 - Tauri v2 resmi mendukung **Android** — satu basis kode untuk tiga target.
 - Webview bawaan OS → binary kecil (~5 MB) dan update tidak perlu bundel Chromium.
 - Voice call bisa pakai WebRTC bawaan webview, tanpa nulis RTP/Opus manual.
 
 Alternatif kalau mau 100% Rust tanpa webview: **Slint** (ada target Android). Konsekuensi:
-animasi/scroll chat dan WebRTC harus dikerjakan tangan. `lanchat-core` tidak perlu diubah —
+animasi/scroll chat dan WebRTC harus dikerjakan tangan. `dekat-core` tidak perlu diubah —
 keduanya cuma konsumen event.
 
 ## Milestone

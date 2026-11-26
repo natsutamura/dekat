@@ -1,7 +1,7 @@
-//! lanchat CLI — harness M0 buat nguji core tanpa UI.
+//! dekat CLI — harness M0 buat nguji core tanpa UI.
 //!
 //! Pemakaian:
-//!   lanchat --name ray --port 41235 --seed 10.10.1.28:41236
+//!   dekat --name ray --port 41235 --seed 10.10.1.28:41236
 //!
 //! Perintah di dalam sesi:
 //!   <teks>            kirim ke semua peer (broadcast)
@@ -11,7 +11,7 @@
 //!   /quit
 
 use anyhow::Result;
-use lanchat_core::{proto::fmt_hms, Config, Event, Node, BROADCAST};
+use dekat_core::{proto::fmt_hms, Config, Event, Node, BROADCAST};
 use std::{
     net::SocketAddr,
     path::PathBuf,
@@ -21,8 +21,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 fn parse_args() -> Result<Config> {
     let mut name = std::env::var("USER").unwrap_or_else(|_| "user".into());
-    let mut port: u16 = lanchat_core::proto::DEFAULT_APP_PORT;
-    let mut data_dir = dirs_or_home().join(".lanchat");
+    let mut port: u16 = dekat_core::proto::DEFAULT_APP_PORT;
+    let mut data_dir = dirs_or_home().join(".dekat");
     let mut seeds: Vec<SocketAddr> = Vec::new();
 
     let mut it = std::env::args().skip(1);
@@ -37,7 +37,7 @@ fn parse_args() -> Result<Config> {
             }
             "--help" | "-h" => {
                 println!(
-                    "lanchat M0\n  --name <nama>\n  --port <port tcp>\n  --dir <data dir>\n  --seed <ip:port> (boleh berkali-kali)"
+                    "dekat M0\n  --name <nama>\n  --port <port tcp>\n  --dir <data dir>\n  --seed <ip:port> (boleh berkali-kali)"
                 );
                 std::process::exit(0);
             }
@@ -52,7 +52,7 @@ fn parse_args() -> Result<Config> {
         seeds,
         discovery: true,
         files_dir: None,
-        allow_plaintext: std::env::var("LANCHAT_ALLOW_PLAINTEXT").is_ok(),
+        allow_plaintext: std::env::var("DEKAT_ALLOW_PLAINTEXT").is_ok(),
     })
 }
 
@@ -155,6 +155,11 @@ fn print_event(e: Event) {
             println!("  ☎ panggilan {call_id} berakhir: {reason}")
         }
         Event::FileOffer { .. } => {}
+        Event::PeerProfile { id, name, .. } => println!(
+            "  ~ {} sekarang bernama {}",
+            &id[..6.min(id.len())],
+            name
+        ),
         Event::Warn(w) => println!("! {w}"),
     }
 }
@@ -172,7 +177,7 @@ async fn main() -> Result<()> {
     let cfg = parse_args()?;
     let node = Node::start(cfg).await?;
 
-    println!("lanchat M0 — {} [{}]", node.name(), node.id());
+    println!("dekat M0 — {} [{}]", node.name(), node.id());
     println!("listening TCP :{}", node.port());
     println!("perintah: <teks> = broadcast, /dm <id> <teks>, /peers, /quit\n");
 
@@ -258,7 +263,7 @@ async fn main() -> Result<()> {
             let who = rest.trim();
             match node.find_peer(who) {
                 Some(p) => {
-                    let call_id = format!("c-{}", &lanchat_core::proto::new_msg_id()[..8]);
+                    let call_id = format!("c-{}", &dekat_core::proto::new_msg_id()[..8]);
                     // simpan juga di sisi pemanggil, supaya /hangup auto bisa dipakai
                     *last_call.lock().unwrap() = Some(call_id.clone());
                     match node.call_offer(&p.id, &call_id, "dummy-offer-sdp") {

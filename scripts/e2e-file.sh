@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # E2E file transfer lewat CLI: dua node nyata, satu file 700 KB, verifikasi sha256.
 set -u
-cd /root/lanchat || exit 1
-BIN=./target/debug/lanchat
+cd /root/dekat || exit 1
+BIN=./target/debug/dekat
 DIR=/tmp/ft-e2e
 rm -rf $DIR; mkdir -p $DIR/a $DIR/b
 mkfifo $DIR/a.in $DIR/b.in

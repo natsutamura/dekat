@@ -1,7 +1,12 @@
-# LAN Chat — iMessage-style, LAN-only, Rust
+# Dekat — iMessage-style, LAN-only, Rust
 
 Chat P2P di jaringan lokal (tanpa server, tanpa internet) untuk **Windows, Linux, Android**.
+Namanya dari bahasa Indonesia: **dekat** — orang-orang yang ada di jaringamu, bukan di server orang lain.
 Tampilan mengikuti iMessage: bubble chat, tema dark/light, status online/idle/DND.
+
+> Catatan rename: aplikasi ini sebelumnya bernama *LAN Chat*. Build baru otomatis
+> memindahkan riwayat lama (`lanchat.db` → `dekat.db`, `~/.lanchat` → `~/.dekat`) saat pertama dijalankan.
+> Env var ikut berubah: `LANCHAT_*` → `DEKAT_*`.
 
 Status: **M0–M3 + voice call selesai & teruji** — app desktop Tauri v2 (6,7 MB release), chat dua arah,
 grup, kirim file dengan verifikasi sha256. Bukti di `docs/M1-M2-RESULT.md` dan `docs/M3-RESULT.md`.
@@ -11,18 +16,18 @@ grup, kirim file dengan verifikasi sha256. Bukti di `docs/M1-M2-RESULT.md` dan `
 ```bash
 # butuh dependency Tauri (Debian/Ubuntu):
 #   libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev build-essential
-cargo build -p lanchat-desktop
-LANCHAT_NAME=ray LANCHAT_PORT=42101 LANCHAT_DIR=~/.lanchat-ray \
-  ./target/debug/lanchat-desktop
+cargo build -p dekat-desktop
+DEKAT_NAME=ray DEKAT_PORT=42101 DEKAT_DIR=~/.dekat-ray \
+  ./target/debug/dekat-desktop
 ```
 
-Dua instance di satu mesin cukup beda `LANCHAT_PORT` + `LANCHAT_DIR`.
+Dua instance di satu mesin cukup beda `DEKAT_PORT` + `DEKAT_DIR`.
 Di mesin lain (satu network) pakai port default saja — keduanya otomatis saling menemukan.
 
 ## Jalanin CLI (buat debugging core)
 
 ```bash
-./target/debug/lanchat --name ray --port 42001 --dir ~/.lanchat
+./target/debug/dekat --name ray --port 42001 --dir ~/.dekat
 ```
 
 ```

@@ -36,8 +36,8 @@ pub struct Config {
     pub discovery: bool,
     /// Folder file masuk. `None` = `<data_dir>/files`.
     ///
-    /// Aplikasi desktop mengisinya dengan `Downloads/LAN Chat` supaya file yang
-    /// diterima mudah ditemukan, seperti aplikasi LAN Chat lain.
+    /// Aplikasi desktop mengisinya dengan `Downloads/Dekat` supaya file yang
+    /// diterima mudah ditemukan, seperti aplikasi chat LAN lain.
     pub files_dir: Option<PathBuf>,
     /// Terima peer versi lama yang belum mendukung TLS.
     ///

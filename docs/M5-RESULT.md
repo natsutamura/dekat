@@ -78,8 +78,8 @@ di-stop, timer berhenti, call bar hilang.
 ## 7. Binary release
 
 ```
-cargo build --release -p lanchat-desktop → EXIT=0
-target/release/lanchat-desktop           → 6.7 MB
+cargo build --release -p dekat-desktop → EXIT=0
+target/release/dekat-desktop           → 6.7 MB
 ```
 
 Dijalankan lewat `bash scripts/e2e-call-ui.sh` (binary release, bukan debug): klik tombol

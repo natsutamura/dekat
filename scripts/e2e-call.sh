@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # E2E signalling voice call lewat CLI: offer → answer → ICE → end.
 set -u
-cd /root/lanchat || exit 1
-BIN=./target/debug/lanchat
+cd /root/dekat || exit 1
+BIN=./target/debug/dekat
 DIR=/tmp/call-e2e
 rm -rf $DIR; mkdir -p $DIR/a $DIR/b
 mkfifo $DIR/a.in $DIR/b.in

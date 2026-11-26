@@ -47,22 +47,22 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          BIN=target/release/lanchat-desktop
+          BIN=target/release/dekat-desktop
           test -x "$BIN"
           APP=$(find target/release/bundle/appimage -name '*.AppImage' | head -1 || true)
           DEB=$(find target/release/bundle/deb -name '*.deb' | head -1 || true)
 
           # tar.gz portabel: binary + .desktop + ikon. Inilah yang dipakai PKGBUILD Arch.
           VER=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          PKG=dist/lanchat-${VER}-linux-x64
+          PKG=dist/dekat-${VER}-linux-x64
           mkdir -p "$PKG/usr/bin" "$PKG/usr/share/applications" "$PKG/usr/share/icons/hicolor/512x512/apps"
-          cp "$BIN" "$PKG/usr/bin/lanchat"
-          cp packaging/lanchat.desktop "$PKG/usr/share/applications/"
-          cp apps/desktop/icons/icon.png "$PKG/usr/share/icons/hicolor/512x512/apps/lanchat.png"
+          cp "$BIN" "$PKG/usr/bin/dekat"
+          cp packaging/dekat.desktop "$PKG/usr/share/applications/"
+          cp apps/desktop/icons/icon.png "$PKG/usr/share/icons/hicolor/512x512/apps/dekat.png"
           tar -C dist -czf "$PKG.tar.gz" "$(basename "$PKG")"
           rm -rf "$PKG"
 
-          [ -n "$APP" ] && cp "$APP" dist/LANChat-x86_64.AppImage
+          [ -n "$APP" ] && cp "$APP" dist/Dekat-x86_64.AppImage
           [ -n "$DEB" ] && cp "$DEB" dist/
           cp README.md dist/README.md
           ls -l dist
@@ -71,7 +71,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LANChat-linux-x64
+          name: Dekat-linux-x64
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -79,7 +79,7 @@ jobs:
       - name: Ringkasan
         shell: bash
         run: |
-          echo "### LAN Chat untuk Linux" >> $GITHUB_STEP_SUMMARY
+          echo "### Dekat untuk Linux" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- AppImage: jalan di distro mana pun (termasuk Arch)" >> $GITHUB_STEP_SUMMARY
           echo "- tar.gz: dipakai PKGBUILD Arch" >> $GITHUB_STEP_SUMMARY

@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! App desktop LAN Chat (Tauri v2). Frontend statis ada di `ui/`.
+//! App desktop Dekat (Tauri v2). Frontend statis ada di `ui/`.
 
-use lanchat_core::{
+use dekat_core::{
     is_room, room_id, Attachment, Config, Event, Node, Status, Store, StoredMessage, Thread,
     BROADCAST,
 };
@@ -147,7 +147,7 @@ fn storage_info(state: State<AppState>) -> StorageInfo {
     StorageInfo {
         data_dir: state.data_dir.to_string_lossy().to_string(),
         files_dir: files.to_string_lossy().to_string(),
-        db_path: state.data_dir.join("lanchat.db").to_string_lossy().to_string(),
+        db_path: state.data_dir.join("dekat.db").to_string_lossy().to_string(),
     }
 }
 
@@ -170,17 +170,17 @@ struct Pairing {
 
 /// Buat URI pairing untuk node ini.
 ///
-/// Format `lanchat://<ip>:<port_discovery>` — port discovery (UDP), bukan port
+/// Format `dekat://<ip>:<port_discovery>` — port discovery (UDP), bukan port
 /// TCP, karena yang dibutuhkan peer baru adalah alamat untuk announce unicast.
 #[tauri::command]
 fn pairing_qr(state: State<AppState>) -> Result<Pairing, String> {
     let _ = state; // port TCP tidak diperlukan di URI
-    build_pairing(&lanchat_core::discovery::local_ip().to_string(), lanchat_core::proto::DISCOVERY_PORT)
+    build_pairing(&dekat_core::discovery::local_ip().to_string(), dekat_core::proto::DISCOVERY_PORT)
 }
 
 /// Bagian murni dari `pairing_qr` supaya bisa diuji tanpa menjalankan app.
 fn build_pairing(ip: &str, port: u16) -> Result<Pairing, String> {
-    let uri = format!("lanchat://{ip}:{port}");
+    let uri = format!("dekat://{ip}:{port}");
     // SVG, bukan PNG: tidak butuh dependensi encoder gambar dan tetap tajam.
     let code = qrcode::QrCode::new(uri.as_bytes()).map_err(|e| format!("gagal buat QR: {e}"))?;
     let svg = code
@@ -206,7 +206,7 @@ mod pairing_tests {
     #[test]
     fn qr_berisi_uri_yang_benar() {
         let p = build_pairing("192.168.1.5", 41234).unwrap();
-        assert_eq!(p.uri, "lanchat://192.168.1.5:41234");
+        assert_eq!(p.uri, "dekat://192.168.1.5:41234");
         assert!(p.svg.starts_with("<svg"), "harus SVG: {}", &p.svg[..40.min(p.svg.len())]);
         assert!(p.svg.len() > 500, "SVG terlalu kecil, QR mungkin kosong");
     }
@@ -214,10 +214,10 @@ mod pairing_tests {
     #[test]
     fn uri_pairing_diterima_dalam_beberapa_bentuk() {
         for s in [
-            "lanchat://192.168.1.5:41234",
+            "dekat://192.168.1.5:41234",
             "  192.168.1.5:41234  ",
-            "lanchat://192.168.1.5:41234/",
-            "lanchat://192.168.1.5:41234\n",
+            "dekat://192.168.1.5:41234/",
+            "dekat://192.168.1.5:41234\n",
         ] {
             let a = parse_pairing_uri(s).unwrap_or_else(|e| panic!("{s} gagal: {e}"));
             assert_eq!(a.to_string(), "192.168.1.5:41234", "input: {s}");
@@ -226,7 +226,7 @@ mod pairing_tests {
 
     #[test]
     fn uri_pairing_salah_ditolak() {
-        for s in ["", "bukan alamat", "lanchat://", "192.168.1.5", "http://x:1"] {
+        for s in ["", "bukan alamat", "dekat://", "192.168.1.5", "http://x:1"] {
             assert!(parse_pairing_uri(s).is_err(), "harusnya ditolak: {s}");
         }
     }
@@ -247,13 +247,13 @@ async fn add_peer_uri(state: State<'_, AppState>, uri: String) -> Result<String,
     Ok(addr.to_string())
 }
 
-/// Terima `lanchat://ip:port`, `ip:port`, atau URL dengan spasi/newline.
+/// Terima `dekat://ip:port`, `ip:port`, atau URL dengan spasi/newline.
 fn parse_pairing_uri(raw: &str) -> Result<std::net::SocketAddr, String> {
-    let cleaned = raw.trim().trim_start_matches("lanchat://");
+    let cleaned = raw.trim().trim_start_matches("dekat://");
     let cleaned = cleaned.split(['/', '?', '\n', ' ']).next().unwrap_or(cleaned);
     cleaned
         .parse()
-        .map_err(|_| format!("format tidak dikenal: {raw} (contoh: lanchat://192.168.1.5:41234)"))
+        .map_err(|_| format!("format tidak dikenal: {raw} (contoh: dekat://192.168.1.5:41234)"))
 }
 
 /// Ganti nama tampilan (bukan nama PC). Berlaku langsung ke semua peer.
@@ -532,7 +532,7 @@ async fn send_file(
                 from_id: st.node.id().to_string(),
                 from_name: st.node.name().to_string(),
                 body: String::new(),
-                ts: lanchat_core::proto::now_ms(),
+                ts: dekat_core::proto::now_ms(),
                 mine: true,
                 delivered: true,
                 read: false,
@@ -540,7 +540,7 @@ async fn send_file(
                     name,
                     size,
                     path: path.to_string_lossy().to_string(),
-                    sha256: lanchat_core::files::sha256_file(&path).unwrap_or_default(),
+                    sha256: dekat_core::files::sha256_file(&path).unwrap_or_default(),
                     mime: String::new(),
                 }),
             };
@@ -576,7 +576,7 @@ async fn send_file_path(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "file".into());
     let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-    let sha = lanchat_core::files::sha256_file(&p).unwrap_or_default();
+    let sha = dekat_core::files::sha256_file(&p).unwrap_or_default();
 
     let targets = targets_for(&st, &t);
     if targets.is_empty() {
@@ -594,7 +594,7 @@ async fn send_file_path(
         from_id: st.node.id().to_string(),
         from_name: st.node.name().to_string(),
         body: String::new(),
-        ts: lanchat_core::proto::now_ms(),
+        ts: dekat_core::proto::now_ms(),
         mine: true,
         delivered: true,
         read: false,
@@ -692,7 +692,7 @@ fn call_end(state: State<AppState>, peerId: String, callId: String, reason: Opti
 fn register_aumid() {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
-    const APP_ID: &str = "id.vuelabs.lanchat";
+    const APP_ID: &str = "id.vuelabs.dekat";
     #[link(name = "shell32")]
     extern "system" {
         fn SetCurrentProcessExplicitAppUserModelID(app_id: *const u16) -> i32;
@@ -774,7 +774,7 @@ fn paste_image_from_clipboard(state: State<'_, AppState>) -> Result<Option<Strin
     std::fs::create_dir_all(&dir).map_err(e2s)?;
 
     // PNG supaya lossless dan bisa langsung ditampilkan inline oleh penerima.
-    let path = dir.join(format!("paste-{}.png", lanchat_core::proto::now_ms()));
+    let path = dir.join(format!("paste-{}.png", dekat_core::proto::now_ms()));
     let file = std::fs::File::create(&path).map_err(e2s)?;
     let mut buf = std::io::BufWriter::new(file);
     {
@@ -816,7 +816,7 @@ fn save_pasted_image(
 
     let dir = state.inner().node.files_dir().join("paste");
     std::fs::create_dir_all(&dir).map_err(e2s)?;
-    let name = format!("paste-{}.{ext}", lanchat_core::proto::now_ms());
+    let name = format!("paste-{}.{ext}", dekat_core::proto::now_ms());
     let path = dir.join(&name);
     std::fs::write(&path, &bytes).map_err(e2s)?;
     Ok(path.to_string_lossy().to_string())
@@ -1109,7 +1109,7 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
                     name: name.clone(),
                     size,
                     path: path.clone(),
-                    sha256: lanchat_core::files::sha256_file(std::path::Path::new(&path))
+                    sha256: dekat_core::files::sha256_file(std::path::Path::new(&path))
                         .unwrap_or_default(),
                     mime: String::new(),
                 }),
@@ -1188,7 +1188,7 @@ fn handle_event(app: &tauri::AppHandle, st: &AppState, ev: Event) {
     }
 }
 
-/// Nama default: `LANCHAT_NAME` → USERNAME (Windows) / USER (Unix) → "user".
+/// Nama default: `DEKAT_NAME` → USERNAME (Windows) / USER (Unix) → "user".
 fn default_name() -> String {
     for key in ["USERNAME", "USER"] {
         if let Ok(v) = std::env::var(key) {
@@ -1200,12 +1200,12 @@ fn default_name() -> String {
     "user".into()
 }
 
-/// Folder data default. Di Windows pakai %APPDATA%\LANChat, di Unix ~/.lanchat.
-/// Folder tempat file yang diterima disimpan: `Downloads/LAN Chat`.
+/// Folder data default. Di Windows pakai %APPDATA%\Dekat, di Unix ~/.dekat.
+/// Folder tempat file yang diterima disimpan: `Downloads/Dekat`.
 ///
-/// Bisa ditimpa dengan `LANCHAT_FILES_DIR` (mis. untuk menyimpan ke drive lain).
+/// Bisa ditimpa dengan `DEKAT_FILES_DIR` (mis. untuk menyimpan ke drive lain).
 fn files_dir() -> std::path::PathBuf {
-    if let Ok(p) = std::env::var("LANCHAT_FILES_DIR") {
+    if let Ok(p) = std::env::var("DEKAT_FILES_DIR") {
         if !p.trim().is_empty() {
             return std::path::PathBuf::from(p);
         }
@@ -1219,27 +1219,58 @@ fn files_dir() -> std::path::PathBuf {
         std::env::var("HOME").map(std::path::PathBuf::from)
     };
     match base {
-        Ok(home) => home.join("Downloads").join("LAN Chat"),
+        Ok(home) => home.join("Downloads").join("Dekat"),
         // Fallback: di samping executable.
         Err(_) => std::env::current_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .join("LAN Chat"),
+            .join("Dekat"),
+    }
+}
+
+/// Migrasi sekali jalan dari nama lama (LAN Chat): `lanchat.db` → `dekat.db`.
+///
+/// Tanpa ini, siapa pun yang sudah memakai build lama akan kehilangan riwayat
+/// chat-nya tanpa peringatan — DB-nya cuma "hilang" karena namanya beda.
+fn migrate_legacy_db(dir: &std::path::Path) {
+    let new = dir.join("dekat.db");
+    let old = dir.join("lanchat.db");
+    if old.exists() && !new.exists() {
+        let _ = std::fs::rename(&old, &new);
+        // SQLite WAL/SHM ikut dipindah, kalau tidak transaksi terakhir bisa rusak.
+        for suffix in ["-wal", "-shm"] {
+            let o = dir.join(format!("lanchat.db{suffix}"));
+            if o.exists() {
+                let _ = std::fs::rename(&o, dir.join(format!("dekat.db{suffix}")));
+            }
+        }
     }
 }
 
 fn default_data_dir() -> std::path::PathBuf {
+    let legacy = |p: std::path::PathBuf| -> std::path::PathBuf {
+        // ~/.lanchat → ~/.dekat, sekali saja, supaya identitas + riwayat ikut.
+        if !p.exists() {
+            if let Some(parent) = p.parent() {
+                let old = parent.join(".lanchat");
+                if old.exists() {
+                    let _ = std::fs::rename(&old, &p);
+                }
+            }
+        }
+        p
+    };
     if cfg!(windows) {
         if let Ok(appdata) = std::env::var("APPDATA") {
-            return std::path::PathBuf::from(appdata).join("LANChat");
+            return legacy(std::path::PathBuf::from(appdata).join("Dekat"));
         }
     }
     if let Ok(home) = std::env::var("HOME") {
-        return std::path::PathBuf::from(home).join(".lanchat");
+        return legacy(std::path::PathBuf::from(home).join(".dekat"));
     }
     // fallback terakhir: folder di samping executable
     std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".lanchat")
+        .join(".dekat")
 }
 
 fn main() {
@@ -1250,41 +1281,41 @@ fn main() {
         .setup(|app| {
             // Harus dipanggil sebelum notifikasi pertama.
             register_aumid();
-            let name = std::env::var("LANCHAT_NAME").unwrap_or_else(|_| default_name());
-            let port: u16 = std::env::var("LANCHAT_PORT")
+            let name = std::env::var("DEKAT_NAME").unwrap_or_else(|_| default_name());
+            let port: u16 = std::env::var("DEKAT_PORT")
                 .ok()
                 .and_then(|p| p.parse().ok())
-                .unwrap_or(lanchat_core::proto::DEFAULT_APP_PORT);
-            let dir = std::env::var("LANCHAT_DIR")
+                .unwrap_or(dekat_core::proto::DEFAULT_APP_PORT);
+            let dir = std::env::var("DEKAT_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| default_data_dir());
 
             let mut cfg = Config::new(name, dir.clone());
             cfg.port = port;
             // File masuk ke Downloads supaya gampang ditemukan, seperti aplikasi
-            // LAN Chat lain. Riwayat chat tetap di folder data aplikasi (AppData)
+            // chat LAN lain. Riwayat chat tetap di folder data aplikasi (AppData)
             // karena itu database, bukan dokumen milik user.
             cfg.files_dir = Some(files_dir());
             // Default: hanya peer yang mendukung TLS. Dinyalakan lewat env kalau
             // memang harus bicara dengan build lama (risiko penyadapan diterima).
-            cfg.allow_plaintext = std::env::var("LANCHAT_ALLOW_PLAINTEXT").is_ok();
-            // LANCHAT_SEED="192.168.1.20:41234,192.168.1.21:41234" untuk jaringan
+            cfg.allow_plaintext = std::env::var("DEKAT_ALLOW_PLAINTEXT").is_ok();
+            // DEKAT_SEED="192.168.1.20:41234,192.168.1.21:41234" untuk jaringan
             // yang memblok multicast (announce dikirim unicast ke alamat ini juga).
-            if let Ok(seeds) = std::env::var("LANCHAT_SEED") {
+            if let Ok(seeds) = std::env::var("DEKAT_SEED") {
                 cfg.seeds = seeds
                     .split(',')
                     .filter_map(|s| s.trim().parse().ok())
                     .collect();
             }
-            // Fallback kalau jaringan memblok multicast: LANCHAT_SEEDS="10.10.1.31:41235,..."
-            if let Ok(s) = std::env::var("LANCHAT_SEEDS") {
+            // Fallback kalau jaringan memblok multicast: DEKAT_SEEDS="10.10.1.31:41235,..."
+            if let Ok(s) = std::env::var("DEKAT_SEEDS") {
                 cfg.seeds = s
                     .split(',')
                     .filter_map(|t| t.trim().parse().ok())
                     .collect();
             }
-            // LANCHAT_DISCOVERY=0 → jangan announce ke multicast (dipakai uji terisolasi)
-            if std::env::var("LANCHAT_DISCOVERY").as_deref() == Ok("0") {
+            // DEKAT_DISCOVERY=0 → jangan announce ke multicast (dipakai uji terisolasi)
+            if std::env::var("DEKAT_DISCOVERY").as_deref() == Ok("0") {
                 cfg.discovery = false;
             }
 
@@ -1293,10 +1324,13 @@ fn main() {
             // Judul window menyertakan nama node supaya dua instance di satu host
             // (dan skrip uji xdotool) bisa dibedakan.
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.set_title(&format!("LAN Chat — {}", node.name()));
+                let _ = win.set_title(&format!("Dekat — {}", node.name()));
             }
-            let store = Store::open(&dir.join("lanchat.db"))
-                .map_err(|e| format!("gagal buka riwayat: {e}"))?;
+            let store = Store::open({
+                migrate_legacy_db(&dir);
+                &dir.join("dekat.db")
+            })
+            .map_err(|e| format!("gagal buka riwayat: {e}"))?;
 
             let state: AppState = Arc::new(App {
                 node,

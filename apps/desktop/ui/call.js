@@ -668,7 +668,7 @@
     });
   }
 
-  window.LanChatCall = {
+  window.DekatCall = {
     init,
     startCall,
     acceptCall,

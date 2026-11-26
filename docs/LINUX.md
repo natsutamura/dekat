@@ -1,4 +1,4 @@
-# LAN Chat di Linux
+# Dekat di Linux
 
 Semua build Linux dibuat di runner Ubuntu 22.04 (lihat `.github/workflows/build-linux.yml`).
 
@@ -7,12 +7,12 @@ Semua build Linux dibuat di runner Ubuntu 22.04 (lihat `.github/workflows/build-
 ### 1. Arch / CachyOS / Manjaro — PKGBUILD
 
 ```bash
-git clone https://github.com/natsutamura/lanchat
-cd lanchat/packaging
+git clone https://github.com/natsutamura/dekat
+cd dekat/packaging
 makepkg -si
 ```
 
-`packaging/PKGBUILD` memasang paket `lanchat-bin` dari tar.gz rilis resmi
+`packaging/PKGBUILD` memasang paket `dekat-bin` dari tar.gz rilis resmi
 (bukan kompilasi ulang — build Tauri butuh 15+ menit).
 
 Dependensi yang dipasang otomatis: `webkit2gtk-4.1`, `gtk3`, `libayatana-appindicator`,
@@ -21,24 +21,24 @@ Dependensi yang dipasang otomatis: `webkit2gtk-4.1`, `gtk3`, `libayatana-appindi
 ### 2. AppImage — distro apa pun
 
 ```bash
-chmod +x LANChat-x86_64.AppImage
-./LANChat-x86_64.AppImage
+chmod +x Dekat-x86_64.AppImage
+./Dekat-x86_64.AppImage
 ```
 
 Tidak perlu instalasi. Butuh FUSE; kalau tidak ada:
-`./LANChat-x86_64.AppImage --appimage-extract` lalu jalankan `squashfs-root/AppRun`.
+`./Dekat-x86_64.AppImage --appimage-extract` lalu jalankan `squashfs-root/AppRun`.
 
 ### 3. tar.gz portabel
 
 ```bash
-tar -xzf lanchat-0.2.0-linux-x64.tar.gz
-sudo cp lanchat-0.2.0-linux-x64/usr/bin/lanchat /usr/local/bin/
+tar -xzf dekat-0.2.0-linux-x64.tar.gz
+sudo cp dekat-0.2.0-linux-x64/usr/bin/dekat /usr/local/bin/
 ```
 
 ### 4. Debian / Ubuntu
 
 ```bash
-sudo apt install ./LANChat_0.2.0_amd64.deb
+sudo apt install ./Dekat_0.2.0_amd64.deb
 ```
 
 ## Dependensi runtime
@@ -71,7 +71,7 @@ sudo ufw allow 41235/tcp
    isi alamat manual:
 
 ```bash
-lanchat --name ray --seed 192.168.43.20:41234
+dekat --name ray --seed 192.168.43.20:41234
 ```
 
 ## Kalau suara tidak jalan
@@ -86,11 +86,11 @@ WebViewGTK kadang butuh `WEBKIT_DISABLE_DMABUF_RENDERER=1` pada GPU lama —
 kalau jendela hitam, jalankan:
 
 ```bash
-WEBKIT_DISABLE_DMABUF_RENDERER=1 lanchat
+WEBKIT_DISABLE_DMABUF_RENDERER=1 dekat
 ```
 
 ## Batasan yang diketahui
 
 - Belum ada paket AUR resmi; PKGBUILD disediakan di repo.
 - Wayland: jalan lewat XWayland. Kalau ada masalah input, coba
-  `GDK_BACKEND=x11 lanchat`.
+  `GDK_BACKEND=x11 dekat`.

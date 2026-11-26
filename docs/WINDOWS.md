@@ -1,20 +1,20 @@
-# Menjalankan LAN Chat di Windows
+# Menjalankan Dekat di Windows
 
-Binary yang kamu butuhkan: **`LANChat.exe`** (dari artifact CI `LANChat-windows-x64.zip`).
-File Linux (`lanchat-desktop`) tidak jalan di Windows — beda platform, harus di-build ulang.
+Binary yang kamu butuhkan: **`Dekat.exe`** (dari artifact CI `Dekat-windows-x64.zip`).
+File Linux (`dekat-desktop`) tidak jalan di Windows — beda platform, harus di-build ulang.
 
 ## Langkah
 
-1. Unduh `LANChat-windows-x64.zip` dari tab **Actions** → run terakhir → bagian *Artifacts*.
-2. Ekstrak ke folder mana pun, misal `C:\LANChat\`.
-3. Klik dua kali `LANChat.exe`.
+1. Unduh `Dekat-windows-x64.zip` dari tab **Actions** → run terakhir → bagian *Artifacts*.
+2. Ekstrak ke folder mana pun, misal `C:\Dekat\`.
+3. Klik dua kali `Dekat.exe`.
    - **Windows Defender / SmartScreen** akan protes karena binary tidak ditandatangani
      (belum ada code signing certificate). Pilih **More info → Run anyway**.
    - **Firewall** akan bertanya. **Wajib Allow** untuk *Private networks*, kalau tidak
      peer lain tidak bisa connect ke kamu.
 4. Nama default = nama user Windows (`USERNAME`). Mau nama lain? Jalankan dari cmd:
    ```cmd
-   set LANCHAT_NAME=ray & LANChat.exe
+   set DEKAT_NAME=ray & Dekat.exe
    ```
 5. Aplikasi lain di jaringan yang sama cukup dibuka; keduanya otomatis saling menemukan.
 
@@ -31,20 +31,20 @@ File Linux (`lanchat-desktop`) tidak jalan di Windows — beda platform, harus d
 1. Pastikan dua perangkat di **subnet yang sama** (mis. `192.168.1.x`).
 2. WiFi publik/kantor sering memakai **AP isolation** — perangkat tidak boleh bicara
    langsung satu sama lain. Ini di luar kendali aplikasi; pakai hotspot HP atau kabel LAN.
-3. Cek firewall: `Windows Defender Firewall → Allow an app` → pastikan LANChat dicentang
+3. Cek firewall: `Windows Defender Firewall → Allow an app` → pastikan Dekat dicentang
    untuk Private.
 4. Sebagian router memblok multicast → tambahkan seed manual lewat env (alamat peer lain,
    port UDP discovery 41234):
    ```cmd
-   set LANCHAT_SEED=192.168.1.20:41234 & LANChat.exe
+   set DEKAT_SEED=192.168.1.20:41234 & Dekat.exe
    ```
    Bisa lebih dari satu, pisahkan koma: `192.168.1.20:41234,192.168.1.21:41234`
 
 ## Data disimpan di mana
 
-`%APPDATA%\LANChat\`
+`%APPDATA%\Dekat\`
 - `identity.json` — keypair perangkat (jangan dibagikan)
-- `lanchat.db` — riwayat chat
+- `dekat.db` — riwayat chat
 - `files\` — file yang kamu terima
 
 Hapus folder itu = reset total (identitas baru, riwayat hilang).
@@ -65,13 +65,13 @@ Hapus folder itu = reset total (identitas baru, riwayat hilang).
 
 Pakai installer, bukan `.exe` telanjang:
 
-- **`LANChat-en-US.msi`** — install per-mesin (butuh admin). Ini yang membuat
+- **`Dekat-en-US.msi`** — install per-mesin (butuh admin). Ini yang membuat
   **notifikasi Windows berfungsi**, karena Windows butuh AppUserModelID yang hanya
   terdaftar lewat installer.
-- **`LANChat-setup.exe`** (NSIS) — install per-user, tanpa admin.
+- **`Dekat-setup.exe`** (NSIS) — install per-user, tanpa admin.
 
 Setelah install, app muncul di Start Menu dan bisa di-uninstall dari
-Settings → Apps. Update = jalankan installer baru, data chat di `%APPDATA%\lanchat`
+Settings → Apps. Update = jalankan installer baru, data chat di `%APPDATA%\dekat`
 tidak terhapus.
 
 ## Kalau notifikasi tidak muncul
@@ -82,7 +82,7 @@ pada versi portable yang tidak punya shortcut Start Menu — sebelumnya Windows
 membuang notifikasi tanpa pesan error.
 
 Windows 10 punya **Focus Assist** (azi) yang menahan notifikasi. Cek
-`Settings → System → Focus assist` dan matikan, atau tambahkan LANChat ke pengecualian.
+`Settings → System → Focus assist` dan matikan, atau tambahkan Dekat ke pengecualian.
 Notifikasi juga butuh aplikasi punya identitas AppUserModelID; tanpa installer `.msi`
 Windows kadang menggabungkan notifikasi ke pemilik proses induk.
 
@@ -96,19 +96,19 @@ Windows kadang menggabungkan notifikasi ke pemilik proses induk.
 
 | isi | lokasi |
 |---|---|
-| File yang diterima (gambar, dokumen) | `C:\Users\<nama>\Downloads\LAN Chat\` |
-| Riwayat chat (SQLite) | `C:\Users\<nama>\AppData\Roaming\LANChat\lanchat.db` |
-| Identitas + kunci TLS | `...\AppData\Roaming\LANChat\identity.json`, `tls\` |
-| Nama & foto profil | `...\AppData\Roaming\LANChat\profile.json` |
+| File yang diterima (gambar, dokumen) | `C:\Users\<nama>\Downloads\Dekat\` |
+| Riwayat chat (SQLite) | `C:\Users\<nama>\AppData\Roaming\Dekat\dekat.db` |
+| Identitas + kunci TLS | `...\AppData\Roaming\Dekat\identity.json`, `tls\` |
+| Nama & foto profil | `...\AppData\Roaming\Dekat\profile.json` |
 
 File masuk sengaja ditaruh di **Downloads** supaya mudah ditemukan, seperti
-aplikasi LAN Chat lain. Riwayat chat tetap di AppData karena itu database
+aplikasi chat LAN lain. Riwayat chat tetap di AppData karena itu database
 aplikasi, bukan dokumen milik user.
 
 Mau simpan file di folder lain? Set environment variable sebelum menjalankan app:
 
 ```powershell
-set LANCHAT_FILES_DIR=D:\Share\LAN Chat
+set DEKAT_FILES_DIR=D:\Share\Dekat
 ```
 
 Lokasi aktif bisa dilihat dan dibuka dari **Pengaturan → File masuk**.
