@@ -24,7 +24,7 @@ conflicts=('dekat')
 options=('!strip')   # binary sudah di-strip oleh profil release
 
 source=("https://github.com/natsutamura/dekat/releases/download/v${pkgver}/dekat-${pkgver}-linux-x64.tar.gz")
-sha256sums=('f63a8db833a9e6beaaff8fbc89802d779980377a89f1b935e1814d6f1b4f52af')
+sha256sums=('35cd2dda5e241d581dcc75e349e149b5da03ccdf197abbd266764780300e37d3')
 
 package() {
   install -Dm755 "${srcdir}/dekat-${pkgver}-linux-x64/usr/bin/dekat" \
