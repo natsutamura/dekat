@@ -8,8 +8,11 @@ Tampilan mengikuti iMessage: bubble chat, tema dark/light, status online/idle/DN
 > memindahkan riwayat lama (`lanchat.db` → `dekat.db`, `~/.lanchat` → `~/.dekat`) saat pertama dijalankan.
 > Env var ikut berubah: `LANCHAT_*` → `DEKAT_*`.
 
-Status: **M0–M3 + voice call selesai & teruji** — app desktop Tauri v2 (6,7 MB release), chat dua arah,
-grup, kirim file dengan verifikasi sha256. Bukti di `docs/M1-M2-RESULT.md` dan `docs/M3-RESULT.md`.
+Status: **M0–M3 selesai, M5/M6 hampir** — app desktop Tauri v2, chat & grup, kirim file (resume otomatis),
+panggilan suara 1:1 & grup (mesh), indikator bicara, pilih mikrofon, nama + foto profil,
+TLS 1.3 dengan autentikasi Ed25519, pairing QR, installer Windows/Linux.
+
+Yang belum: video call, updater (repo masih private), code signing (butuh sertifikat), Android.
 
 ## Jalanin app desktop
 
