@@ -6,7 +6,7 @@
 # 15+ menit. Kalau kamu mau kompilasi sendiri, ganti source=() dengan repo git
 # dan isi build()/package() dengan `cargo build --release`.
 pkgname=dekat-bin
-pkgver=0.3.0
+pkgver=0.3.1
 pkgrel=1
 pkgdesc="Chat, kirim file, dan panggilan suara peer-to-peer di jaringan lokal (tanpa server)"
 arch=('x86_64')
